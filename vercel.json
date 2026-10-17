@@ -1,6 +1,10 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "api/index.ts": { "runtime": "@vercel/node@5" }
+  },
   "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/index?route=$1" },
     { "source": "/", "destination": "/fb091d/index.html" },
     { "source": "/signup", "destination": "/fb091d/index.html" },
     { "source": "/login", "destination": "/fb091d/index.html" },
