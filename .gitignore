@@ -1,0 +1,17 @@
+# Local secrets and environment configuration
+.env
+.env.*
+!.env.example
+
+# Dependencies and build output
+node_modules/
+.vercel/
+dist/
+build/
+.env.local
+
+# Local editor and operating-system files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

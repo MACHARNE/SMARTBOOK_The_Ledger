@@ -1,0 +1,8 @@
+{
+  "name": "smart-book-ledger",
+  "private": true,
+  "workspaces": ["bk095d"],
+  "scripts": {
+    "typecheck": "npm --workspace bk095d run typecheck"
+  }
+}

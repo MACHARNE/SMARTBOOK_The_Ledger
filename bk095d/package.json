@@ -1,0 +1,22 @@
+{
+  "name": "smartbook-backend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "check:frontend": "node scripts/check-frontend-syntax.cjs",
+    "check:export": "node --import tsx scripts/check-export.ts",
+    "apply:migrations": "node --use-system-ca --env-file=../.env scripts/apply-migrations.cjs",
+    "verify:rls": "node --use-system-ca --env-file=../.env --import tsx scripts/verify-rls.ts"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.57.0"
+  },
+  "devDependencies": {
+    "@babel/parser": "^8.0.7",
+    "@types/node": "^22.18.0",
+    "pg": "^8.23.1",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  }
+}
