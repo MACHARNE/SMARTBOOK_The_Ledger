@@ -86,7 +86,7 @@ begin
       );
     elsif item.table_name = 'dispatches' then
       execute format(
-        'create policy tenant_insert on public.%I for insert to authenticated with check (public.can_insert_organization_data(organization_id, %L) and (public.can_write_organization(organization_id, %L) or (status = %L and payload->>%L = %L and payload->>%L = id and payload->>%L = date::text and (payload->>%L)::numeric = product_amount and (payload->>%L)::numeric = delivery_amount)))',
+        'create policy tenant_insert on public.%I for insert to authenticated with check (public.can_insert_organization_data(organization_id, %L) and (public.can_write_organization(organization_id, %L) or (status = %L and payload->>%L = %L and payload->>%L = id and payload->>%L = dispatch_date::text and (payload->>%L)::numeric = product_amount and (payload->>%L)::numeric = delivery_amount)))',
         item.table_name, item.data_key, item.data_key, 'yet_to_deliver', 'status', 'yet_to_deliver', 'id', 'date', 'productAmount', 'deliveryAmount'
       );
     else
