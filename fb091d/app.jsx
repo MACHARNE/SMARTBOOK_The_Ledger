@@ -4907,7 +4907,11 @@ function App() {
 
   useEffect(() => {
     (async () => {
-      if (window.location.hash.includes("type=recovery") || new URLSearchParams(window.location.search).get("type") === "recovery") setPasswordRecovery(true);
+      const query = new URLSearchParams(window.location.search);
+      const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+      if (query.get("type") === "recovery" || hash.get("type") === "recovery") setPasswordRecovery(true);
+      const authError = query.get("error_description") || hash.get("error_description");
+      if (authError) setError(authError.replace(/\+/g, " "));
       try {
         const configResponse = await fetch("/api/config", { cache: "no-store" });
         const config = await configResponse.json();
@@ -5011,8 +5015,9 @@ function App() {
   const requestPasswordReset = async (email) => {
     setError(""); setNotice(""); setBusy(true);
     try {
-      const resetPath = superAdminRoute ? "/super-admin/login" : adminRoute ? "/admin/login" : "/login";
-      const { error: resetError } = await client.auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}${resetPath}` });
+      // Use the single redirect path already shared by all account types. The
+      // role is resolved from the verified session after the password changes.
+      const { error: resetError } = await client.auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/login` });
       if (resetError) throw resetError;
       setNotice("If the email is registered, a password reset link has been sent.");
     } catch (e) { setError(e.message || "Could not request a password reset."); }
@@ -5024,14 +5029,27 @@ function App() {
     try {
       const { error: updateError } = await client.auth.updateUser({ password });
       if (updateError) throw updateError;
+      const { data: sessionData } = await client.auth.getSession();
+      let session = sessionData.session;
+      if (!session) throw new Error("Your password was changed, but the recovery session has expired. Sign in with your new password.");
       if (passwordResetRequired) {
-        const { data } = await client.auth.getSession();
-        const response = await fetch("/api/auth/complete-password-reset", { method: "POST", headers: { Authorization: `Bearer ${data.session.access_token}` } });
+        const response = await fetch("/api/auth/complete-password-reset", { method: "POST", headers: { Authorization: `Bearer ${session.access_token}` } });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || "Could not complete the required password reset.");
-        if (platformAdminRoute) await loadAdminData(client, data.session.access_token);
       }
-      setPasswordResetRequired(false); setPasswordRecovery(false); setNotice("Password updated. You can continue.");
+      const { data: refreshedSession } = await client.auth.refreshSession();
+      session = refreshedSession.session || session;
+      const account = await loadAccount(client, session.access_token);
+      setPasswordResetRequired(false); setPasswordRecovery(false);
+      if (account.kind === "platform_admin") {
+        const portal = account.role === "super_admin" ? "/super-admin/login" : "/admin/login";
+        if (!platformAdminRoute || portal !== path) {
+          window.location.replace(portal);
+          return;
+        }
+        await loadAdminData(client, session.access_token);
+      }
+      setNotice("Password updated. You can continue.");
     } catch (e) { setError(e.message || "Could not update password."); }
     finally { setBusy(false); }
   };
