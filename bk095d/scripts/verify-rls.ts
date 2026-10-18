@@ -31,6 +31,9 @@ async function main() {
 
   const userA = await createUser(`rls-a-${suffix}@example.test`);
   const userB = await createUser(`rls-b-${suffix}@example.test`);
+  const staffId = await createUser(`rls-staff-${suffix}@example.test`);
+  const viewerId = await createUser(`rls-viewer-${suffix}@example.test`);
+  const platformAdminId = await createUser(`rls-admin-${suffix}@example.test`);
   const makeOrg = async (name: string, userId: string) => {
     const { data, error } = await admin.from("organizations").insert({ name, slug: `${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${suffix}`, status: "active" }).select("id").single();
     if (error || !data) throw error || new Error("Test organization could not be created.");
@@ -39,10 +42,28 @@ async function main() {
     if (member.error) throw member.error;
     const category = await admin.from("categories").insert({ organization_id: data.id, id: "test_income", category_type: "income", label: "Test income", cogs: false, payload: { id: "test_income", label: "Test income" } });
     if (category.error) throw category.error;
+    const expenseCategory = await admin.from("categories").insert({ organization_id: data.id, id: "test_expense", category_type: "expense", label: "Test expense", cogs: false, payload: { id: "test_expense", label: "Test expense", cogs: false } });
+    if (expenseCategory.error) throw expenseCategory.error;
     return data.id as string;
   };
   const orgA = await makeOrg(`RLS Test A ${suffix}`, userA);
   const orgB = await makeOrg(`RLS Test B ${suffix}`, userB);
+  const viewerMembership = await admin.from("organization_members").insert({ organization_id: orgA, user_id: viewerId, role: "viewer", status: "active" });
+  if (viewerMembership.error) throw viewerMembership.error;
+  const staffMembership = await admin.from("organization_members").insert({ organization_id: orgA, user_id: staffId, role: "staff", status: "active" });
+  if (staffMembership.error) throw staffMembership.error;
+  const platformAdmin = await admin.from("platform_admins").insert({ user_id: platformAdminId, role: "admin" });
+  if (platformAdmin.error) throw platformAdmin.error;
+  const ownerRecord = await admin.from("transactions").insert({
+    organization_id: orgA, id: "owner-row", date: "2026-01-01", transaction_type: "income", category_id: "test_income", amount: 90,
+    payload: { id: "owner-row", date: "2026-01-01", type: "income", category: "test_income", amount: 90 },
+  });
+  if (ownerRecord.error) throw ownerRecord.error;
+  const openCreditSale = await admin.from("credit_sales").insert({
+    organization_id: orgA, id: "owner-credit", category_id: "test_income", sale_date: "2026-01-01", amount: 25, status: "outstanding",
+    payload: { id: "owner-credit", category: "test_income", date: "2026-01-01", amount: 25, status: "outstanding" },
+  });
+  if (openCreditSale.error) throw openCreditSale.error;
   const secretRecord = await admin.from("transactions").insert({
     organization_id: orgB, id: "secret-row", date: "2026-01-01", transaction_type: "income", category_id: "test_income", amount: 120,
     payload: { id: "secret-row", date: "2026-01-01", type: "income", category: "test_income", amount: 120 },
@@ -51,17 +72,76 @@ async function main() {
 
   const clientA = createClient(url!, anonKey!, { auth: { autoRefreshToken: false, persistSession: false } });
   const clientB = createClient(url!, anonKey!, { auth: { autoRefreshToken: false, persistSession: false } });
+  const staffClient = createClient(url!, anonKey!, { auth: { autoRefreshToken: false, persistSession: false } });
+  const viewerClient = createClient(url!, anonKey!, { auth: { autoRefreshToken: false, persistSession: false } });
+  const platformAdminClient = createClient(url!, anonKey!, { auth: { autoRefreshToken: false, persistSession: false } });
   const loginA = await clientA.auth.signInWithPassword({ email: `rls-a-${suffix}@example.test`, password });
   const loginB = await clientB.auth.signInWithPassword({ email: `rls-b-${suffix}@example.test`, password });
-  if (loginA.error || loginB.error) throw loginA.error || loginB.error;
+  const staffLogin = await staffClient.auth.signInWithPassword({ email: `rls-staff-${suffix}@example.test`, password });
+  const viewerLogin = await viewerClient.auth.signInWithPassword({ email: `rls-viewer-${suffix}@example.test`, password });
+  const platformAdminLogin = await platformAdminClient.auth.signInWithPassword({ email: `rls-admin-${suffix}@example.test`, password });
+  if (loginA.error || loginB.error || staffLogin.error || viewerLogin.error || platformAdminLogin.error) throw loginA.error || loginB.error || staffLogin.error || viewerLogin.error || platformAdminLogin.error;
 
   const crossRead = await clientA.from("transactions").select("id").eq("organization_id", orgB);
   assert(!crossRead.error && crossRead.data?.length === 0, "organization A must not read organization B rows");
+  const mismatchedCategory = await clientA.from("transactions").insert({
+    organization_id: orgA, id: "wrong-category-row", date: "2026-01-02", transaction_type: "expense", category_id: "test_income", amount: 1,
+    payload: { id: "wrong-category-row", amount: 1 },
+  });
+  assert(mismatchedCategory.error?.code === "23514", "expense rows must use an expense category");
   const crossWrite = await clientA.from("transactions").insert({
     organization_id: orgB, id: "forged-row", date: "2026-01-02", transaction_type: "income", category_id: "test_income", amount: 1,
     payload: { id: "forged-row", amount: 1 },
   });
   assert(crossWrite.error?.code === "42501", "organization A must not write into organization B (RLS must deny the write)");
+
+  const viewerRead = await viewerClient.from("transactions").select("id").eq("organization_id", orgA);
+  assert(!viewerRead.error && viewerRead.data?.some((row) => row.id === "owner-row"), "viewers must read active organization records");
+  const viewerWrite = await viewerClient.from("transactions").insert({
+    organization_id: orgA, id: "viewer-forged-row", date: "2026-01-02", transaction_type: "income", category_id: "test_income", amount: 1,
+    payload: { id: "viewer-forged-row", amount: 1 },
+  });
+  assert(viewerWrite.error?.code === "42501", "viewers must not write ledger rows");
+
+  const staffWrite = await staffClient.from("transactions").insert({
+    organization_id: orgA, id: "staff-row", date: "2026-01-02", transaction_type: "income", category_id: "test_income", amount: 10,
+    payload: { id: "staff-row", date: "2026-01-02", type: "income", category: "test_income", amount: 10 },
+  });
+  assert(!staffWrite.error, "staff must be able to add operational ledger records");
+  const staffMismatchedPayload = await staffClient.from("transactions").insert({
+    organization_id: orgA, id: "staff-payload-row", date: "2026-01-02", transaction_type: "income", category_id: "test_income", amount: 10,
+    payload: { id: "staff-payload-row", date: "2026-01-02", type: "income", category: "test_income", amount: 1000 },
+  });
+  assert(staffMismatchedPayload.error?.code === "42501", "staff cannot write ledger columns that disagree with the displayed record");
+  const staffExpense = await staffClient.from("transactions").insert({
+    organization_id: orgA, id: "staff-expense", date: "2026-01-02", transaction_type: "expense", category_id: "test_expense", amount: 1,
+    payload: { id: "staff-expense", amount: 1 },
+  });
+  assert(staffExpense.error?.code === "42501", "staff must not record expenses");
+  const staffPaidCredit = await staffClient.from("credit_sales").insert({
+    organization_id: orgA, id: "staff-paid-credit", category_id: "test_income", sale_date: "2026-01-02", amount: 10, status: "paid",
+    payload: { id: "staff-paid-credit", category: "test_income", date: "2026-01-02", amount: 10, status: "paid" },
+  });
+  assert(staffPaidCredit.error?.code === "42501", "staff cannot bypass credit settlement by creating an already-paid sale");
+  const staffCreditPayment = await staffClient.from("credit_payments").insert({
+    organization_id: orgA, id: "staff-credit-payment", credit_sale_id: "owner-credit", payment_date: "2026-01-02", amount: 25,
+    payload: { paidDate: "2026-01-02", paidMethod: "Cash" },
+  });
+  assert(staffCreditPayment.error?.code === "42501", "staff cannot record a credit payment outside the settlement workflow");
+  const staffUpdate = await staffClient.from("transactions").update({ amount: 11 }).eq("organization_id", orgA).eq("id", "staff-row").select("id");
+  assert(!staffUpdate.error && staffUpdate.data?.length === 0, "staff must not edit saved financial records");
+  const staffDelete = await staffClient.from("transactions").delete().eq("organization_id", orgA).eq("id", "staff-row").select("id");
+  assert(!staffDelete.error && staffDelete.data?.length === 0, "staff must not delete saved financial records");
+  const staffVersion = await staffClient.rpc("claim_org_data_version", { p_organization_id: orgA, p_data_key: "transactions", p_expected_version: 0 });
+  assert(!staffVersion.error && staffVersion.data === 1, "staff must be able to claim an append-only operational collection version");
+
+  const adminTenantRead = await platformAdminClient.from("transactions").select("id").eq("organization_id", orgB);
+  assert(!adminTenantRead.error && adminTenantRead.data?.length === 0, "platform admins must not have implicit access to tenant ledger rows");
+  const adminTenantWrite = await platformAdminClient.from("transactions").insert({
+    organization_id: orgB, id: "admin-forged-row", date: "2026-01-02", transaction_type: "income", category_id: "test_income", amount: 1,
+    payload: { id: "admin-forged-row", amount: 1 },
+  });
+  assert(adminTenantWrite.error?.code === "42501", "platform admins must not write tenant ledger rows through the browser API");
 
   const pending = await admin.from("organizations").update({ status: "pending" }).eq("id", orgA);
   if (pending.error) throw pending.error;
@@ -109,7 +189,7 @@ async function main() {
     const publicSignup = await fetch(`${baseUrl.replace(/\/$/, "")}/api/signup`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
     assert(publicSignup.status === 403, "public signup must be invitation-only");
   }
-  console.log("RLS checks passed: cross-tenant read/write, pending/rejected/suspended read and write denial, direct Auth signup denial, public admin grant, and self-activation." + (baseUrl ? " API authorization checks passed." : " Set SMARTBOOK_BASE_URL to run API authorization checks."));
+  console.log("RLS checks passed: cross-tenant isolation, staff sales-only append access, viewer read-only access, platform-admin tenant isolation, inactive-organization denial, direct Auth signup denial, public admin grant, and self-activation." + (baseUrl ? " API authorization checks passed." : " Set SMARTBOOK_BASE_URL to run API authorization checks."));
 }
 
 try { await main(); }

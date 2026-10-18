@@ -7,12 +7,13 @@ From the repository root:
 ```sh
 npm --workspace bk095d run typecheck
 npm --workspace bk095d run check:frontend
+npm --workspace bk095d run check:export
 npm --workspace bk095d run verify:rls
 ```
 
 Configure Supabase credentials in the ignored `.env` and apply all migrations first. The RLS script creates disposable Auth users and organizations, then removes them in `finally` cleanup. On the production project, it refuses to run if any organization already exists unless `SMARTBOOK_ALLOW_PRODUCTION_RLS_TESTS=true` is set after arranging a maintenance window and backup. Set `SMARTBOOK_BASE_URL` to a preview deployment to include API authorization checks.
 
-The script verifies that Supabase REST requests cannot read/write across organizations; pending, rejected, and suspended organizations return no ledger rows and cannot write ledger rows; direct public Auth signup is disabled; public authenticated users cannot write `platform_admins`; non-admin users cannot activate an organization; a company-user JWT is denied by a super-admin API; and `/api/signup` rejects self-service company creation.
+The script verifies that Supabase REST requests cannot read/write across organizations; staff can append sales but cannot edit/delete financial rows or record expenses; viewers are read-only; platform admins have no implicit access to tenant ledger tables; pending, rejected, and suspended organizations return no ledger rows and cannot write ledger rows; direct public Auth signup is disabled; public authenticated users cannot write `platform_admins`; non-admin users cannot activate an organization; a company-user JWT is denied by a super-admin API; and `/api/signup` rejects self-service company creation.
 
 ## Manual acceptance checks
 
@@ -26,5 +27,6 @@ The script verifies that Supabase REST requests cannot read/write across organiz
 8. Confirm day/week/month/year report ranges and verify a company user sees no organization Excel export control.
 9. As a super admin, request `/api/export/org/<organization-id>.xlsx` and confirm a valid workbook downloads.
 10. Inspect built browser assets and deployment variables: no service-role key, initial-admin temporary password, or provisioning secret may be present.
+11. Confirm the applied `0004_role_scoped_ledger_access.sql` migration, then test owner, accountant, staff, and viewer access separately. Staff can add sales and dispatch drafts; owner/accountant approval, expense, payment, setting, edit, and delete actions must be denied to staff and viewers.
 
 The script creates and deletes temporary production records when explicitly run against production. Review cleanup counts after each live run. Do not use it while real organizations are onboarding.

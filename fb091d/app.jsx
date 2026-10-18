@@ -36,6 +36,10 @@ const naira = (n) =>
     currency: "NGN",
     maximumFractionDigits: 0,
   }).format(Math.round(n || 0));
+const parseMoney = (value) => {
+  const amount = Number.parseFloat(value);
+  return Number.isFinite(amount) ? Math.round((amount + Number.EPSILON) * 100) / 100 : NaN;
+};
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const localDateKey = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -101,7 +105,7 @@ function getPeriodRange(mode, anchorStr) {
   return { start, end, label: start.toLocaleDateString("en-GB", { month: "long", year: "numeric" }) };
 }
 
-function MeatShareLedger({ orgName, appTitle, tagline } = {}) {
+function MeatShareLedger({ orgName, appTitle, tagline, role = "viewer" } = {}) {
   const [businessProfile, setBusinessProfile] = useState({ name: "", phone: "", address: "", note: "" });
   const [profileDraft, setProfileDraft] = useState({ name: "", phone: "", address: "", note: "" });
   const [profileSaved, setProfileSaved] = useState(false);
@@ -118,6 +122,18 @@ function MeatShareLedger({ orgName, appTitle, tagline } = {}) {
   const [newExpenseCatCogs, setNewExpenseCatCogs] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const canManage = role === "owner" || role === "accountant";
+  const canRecord = canManage || role === "staff";
+  const requireManager = () => {
+    if (canManage) return true;
+    setSaveError("This action requires an organization owner or accountant.");
+    return false;
+  };
+  const requireRecorder = () => {
+    if (canRecord) return true;
+    setSaveError("Your organization role is view-only.");
+    return false;
+  };
   const [tab, setTab] = useState("home");
   const [payingId, setPayingId] = useState(null);
   const [payDraft, setPayDraft] = useState({ date: todayStr(), method: "Cash" });
@@ -423,6 +439,7 @@ function MeatShareLedger({ orgName, appTitle, tagline } = {}) {
   }, []);
 
   const addIncomeCategory = () => {
+    if (!requireManager()) return;
     if (!newIncomeCat.trim()) return;
     const id = slugify(newIncomeCat);
     if (categories.income.some((c) => c.id === id)) return;
@@ -431,6 +448,7 @@ function MeatShareLedger({ orgName, appTitle, tagline } = {}) {
   };
 
   const addExpenseCategory = () => {
+    if (!requireManager()) return;
     if (!newExpenseCat.trim()) return;
     const id = slugify(newExpenseCat);
     if (categories.expense.some((c) => c.id === id)) return;
@@ -443,6 +461,7 @@ function MeatShareLedger({ orgName, appTitle, tagline } = {}) {
   };
 
   const renameCategory = (type, id, newLabel) => {
+    if (!requireManager()) return;
     persistCategories({
       ...categories,
       [type]: categories[type].map((c) => (c.id === id ? { ...c, label: newLabel } : c)),
@@ -450,6 +469,7 @@ function MeatShareLedger({ orgName, appTitle, tagline } = {}) {
   };
 
   const toggleCategoryCogs = (id) => {
+    if (!requireManager()) return;
     persistCategories({
       ...categories,
       expense: categories.expense.map((c) => (c.id === id ? { ...c, cogs: !c.cogs } : c)),
@@ -457,8 +477,18 @@ function MeatShareLedger({ orgName, appTitle, tagline } = {}) {
   };
 
   const removeCategory = (type, id) => {
+    if (!requireManager()) return;
     if (categories[type].length <= 1) return; // keep at least one category per type
+    const referenced = type === "income"
+      ? transactions.some((item) => item.category === id) || creditSales.some((item) => item.category === id) || budgets.some((budget) => budget.items.some((item) => item.category === id))
+      : transactions.some((item) => item.category === id) || budgets.some((budget) => budget.items.some((item) => item.category === id));
+    if (referenced) {
+      setSaveError("This category is used by saved ledger or budget records. Rename it or move those records before removing it.");
+      return;
+    }
+    if (!window.confirm(`Remove the ${categories[type].find((category) => category.id === id)?.label || "selected"} category?`)) return;
     persistCategories({ ...categories, [type]: categories[type].filter((c) => c.id !== id) });
+    addLog("Category removed", `${categoryLabel(categories, type, id)} category removed from Settings`);
   };
 
   const persistStockItems = useCallback(async (next) => {
@@ -512,6 +542,7 @@ function MeatShareLedger({ orgName, appTitle, tagline } = {}) {
   }, []);
 
   const addRole = () => {
+    if (!requireManager()) return;
     if (!newRoleName.trim()) return;
     const id = slugify(newRoleName);
     if (roles.some((r) => r.id === id)) return;
@@ -520,15 +551,24 @@ function MeatShareLedger({ orgName, appTitle, tagline } = {}) {
   };
 
   const updateRole = (id, patch) => {
+    if (!requireManager()) return;
     persistRoles(roles.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   };
 
   const removeRole = (id) => {
+    if (!requireManager()) return;
     if (roles.length <= 1) return;
+    if (workers.some((worker) => worker.roleId === id)) {
+      setSaveError("This commission role is assigned to a worker. Reassign the worker before removing the role.");
+      return;
+    }
+    if (!window.confirm(`Remove the ${roles.find((role) => role.id === id)?.name || "selected"} commission role?`)) return;
     persistRoles(roles.filter((r) => r.id !== id));
+    addLog("Commission role removed", `${roles.find((role) => role.id === id)?.name || "Role"} removed from Settings`);
   };
 
   const addWorker = () => {
+    if (!requireManager()) return;
     if (!newWorkerName.trim() || !newWorkerRole) return;
     const entry = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -542,7 +582,15 @@ function MeatShareLedger({ orgName, appTitle, tagline } = {}) {
   };
 
   const removeWorker = (id) => {
+    if (!requireManager()) return;
+    if (dispatches.some((dispatch) => dispatch.dispatcherId === id || dispatch.bdoId === id)) {
+      setSaveError("This worker is linked to a delivery record. Keep the worker for reporting or reassign the deliveries before removing them.");
+      return;
+    }
+    const worker = workers.find((item) => item.id === id);
+    if (!window.confirm(`Remove ${worker?.name || "this worker"}?`)) return;
     persistWorkers(workers.filter((w) => w.id !== id));
+    addLog("Worker removed", `${worker?.name || "Worker"} removed from Settings`);
   };
 
   const computeCommission = (roleId, deliveryAmount) => {
@@ -553,6 +601,7 @@ function MeatShareLedger({ orgName, appTitle, tagline } = {}) {
   };
 
   const addStockItem = () => {
+    if (!requireManager()) return;
     if (!newStockItemName.trim()) return;
     const entry = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -567,12 +616,21 @@ function MeatShareLedger({ orgName, appTitle, tagline } = {}) {
   };
 
   const deleteStockItem = (id) => {
+    if (!requireManager()) return;
+    if (stockMovements.some((movement) => movement.itemId === id)) {
+      setSaveError("This stock item has movement history. Keep it in Stock Book so past balances remain available.");
+      return;
+    }
+    const item = stockItems.find((stockItem) => stockItem.id === id);
+    if (!window.confirm(`Remove ${item?.name || "this stock item"}?`)) return;
     persistStockItems(stockItems.filter((s) => s.id !== id));
     persistStockMovements(stockMovements.filter((m) => m.itemId !== id));
     if (selectedStockItem === id) setSelectedStockItem(null);
+    addLog("Stock item removed", `${item?.name || "Stock item"} removed from Stock Book`);
   };
 
   const addStockMovement = (idArg) => {
+    if (!requireManager()) return;
     const targetId = typeof idArg === "string" ? idArg : selectedStockItem;
     const qty = parseFloat(stockMoveForm.quantity);
     if (!targetId || !stockMoveForm.date || !qty || qty <= 0) return;
@@ -600,12 +658,18 @@ function MeatShareLedger({ orgName, appTitle, tagline } = {}) {
   };
 
   const deleteStockMovement = (id) => {
+    if (!requireManager()) return;
+    const movement = stockMovements.find((item) => item.id === id);
+    if (!movement || !window.confirm("Delete this stock movement? The recorded stock balance will change.")) return;
     persistStockMovements(stockMovements.filter((m) => m.id !== id));
+    const item = stockItems.find((stockItem) => stockItem.id === movement.itemId);
+    addLog("Stock movement deleted", `${movement.type} ${movement.quantity} ${item?.unit || "units"} ${item?.name || "stock item"} movement deleted`);
   };
 
   const recordDispatch = () => {
-    const productAmt = parseFloat(dispatchForm.productAmount) || 0;
-    const deliveryAmt = parseFloat(dispatchForm.deliveryAmount);
+    if (!requireRecorder()) return;
+    const productAmt = parseMoney(dispatchForm.productAmount) || 0;
+    const deliveryAmt = parseMoney(dispatchForm.deliveryAmount);
     if (!dispatchForm.date || !deliveryAmt || deliveryAmt <= 0) return;
     const entry = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -650,6 +714,7 @@ function MeatShareLedger({ orgName, appTitle, tagline } = {}) {
   };
 
   const updateDispatchStatus = (id, newStatus) => {
+    if (!requireManager()) return;
     const entry = dispatches.find((d) => d.id === id);
     if (!entry || entry.status === "delivered") return; // financial effects lock once delivered
     if (newStatus === "delivered") {
@@ -692,6 +757,7 @@ function MeatShareLedger({ orgName, appTitle, tagline } = {}) {
   };
 
   const confirmVendorRemit = () => {
+    if (!requireManager()) return;
     const entry = dispatches.find((d) => d.id === remitDraft.id);
     if (!entry) return;
     persistDispatches(
@@ -720,6 +786,7 @@ function MeatShareLedger({ orgName, appTitle, tagline } = {}) {
   }, [workers, dispatches, roles]);
 
   const payWorkerCommission = (workerId) => {
+    if (!requireManager()) return;
     const summary = workerCommissionSummary.find((s) => s.worker.id === workerId);
     if (!summary || summary.unpaid <= 0) return;
     const txEntry = {
@@ -785,7 +852,8 @@ function MeatShareLedger({ orgName, appTitle, tagline } = {}) {
   );
 
   const addTransaction = () => {
-    const amt = parseFloat(form.amount);
+    if (form.type === "income" ? !requireRecorder() : !requireManager()) return;
+    const amt = parseMoney(form.amount);
     if (!form.date || !amt || amt <= 0 || !form.category) return;
     const entry = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -803,11 +871,21 @@ function MeatShareLedger({ orgName, appTitle, tagline } = {}) {
   };
 
   const deleteTransaction = (id) => {
+    if (!requireManager()) return;
+    const transaction = transactions.find((item) => item.id === id);
+    if (!transaction) return;
+    if (transaction.creditId) {
+      setSaveError("This income entry is linked to a credit settlement. Keep it to preserve the payment and report totals.");
+      return;
+    }
+    if (!window.confirm(`Delete this ${transaction.type} entry for ${naira(transaction.amount)}?`)) return;
     persist(transactions.filter((t) => t.id !== id));
+    addLog("Ledger entry deleted", `${transaction.type} ${naira(transaction.amount)} — ${transaction.description || categoryLabel(categories, transaction.type, transaction.category)}`);
   };
 
   const addCreditSale = () => {
-    const amt = parseFloat(creditForm.amount);
+    if (!requireRecorder()) return;
+    const amt = parseMoney(creditForm.amount);
     if (!creditForm.customerName.trim() || !creditForm.date || !amt || amt <= 0) return;
     const entry = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -824,7 +902,8 @@ function MeatShareLedger({ orgName, appTitle, tagline } = {}) {
   };
 
   const recordSale = () => {
-    const amt = parseFloat(salesForm.amount);
+    if (!requireRecorder()) return;
+    const amt = parseMoney(salesForm.amount);
     if (!salesForm.date || !amt || amt <= 0 || !salesForm.category) return;
 
     if (salesForm.saleType === "credit") {
@@ -885,7 +964,8 @@ function MeatShareLedger({ orgName, appTitle, tagline } = {}) {
   };
 
   const recordProcurement = () => {
-    const amt = parseFloat(procurementForm.amount);
+    if (!requireManager()) return;
+    const amt = parseMoney(procurementForm.amount);
     if (!procurementForm.date || !amt || amt <= 0 || !procurementForm.category) return;
 
     const desc = [procurementForm.supplier.trim(), procurementForm.description.trim()].filter(Boolean).join(" — ");
@@ -938,6 +1018,7 @@ function MeatShareLedger({ orgName, appTitle, tagline } = {}) {
   };
 
   const confirmPayment = (entry) => {
+    if (!requireManager()) return;
     const txEntry = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       date: payDraft.date,
@@ -960,10 +1041,20 @@ function MeatShareLedger({ orgName, appTitle, tagline } = {}) {
   };
 
   const deleteCreditSale = (id) => {
+    if (!requireManager()) return;
+    const creditSale = creditSales.find((item) => item.id === id);
+    if (!creditSale) return;
+    if (creditSale.status === "paid") {
+      setSaveError("This credit sale has been settled. Keep it so its payment remains linked to the ledger.");
+      return;
+    }
+    if (!window.confirm(`Delete the outstanding credit sale for ${creditSale.customerName} (${naira(creditSale.amount)})?`)) return;
     persistCredit(creditSales.filter((c) => c.id !== id));
+    addLog("Credit sale deleted", `${naira(creditSale.amount)} outstanding sale for ${creditSale.customerName} deleted`);
   };
 
   const savePin = () => {
+    if (!requireManager()) return;
     if (!pinSetupDraft.trim()) return;
     const next = { approverPin: pinSetupDraft.trim(), setupDone: true };
     setSettings(next);
@@ -978,7 +1069,7 @@ function MeatShareLedger({ orgName, appTitle, tagline } = {}) {
   };
 
   const addDraftItem = () => {
-    const amt = parseFloat(budgetItemDraft.amount);
+    const amt = parseMoney(budgetItemDraft.amount);
     if (!budgetItemDraft.description.trim() || !amt || amt <= 0) return;
     setDraftItems((items) => [
       ...items,
@@ -997,6 +1088,7 @@ function MeatShareLedger({ orgName, appTitle, tagline } = {}) {
   const removeDraftItem = (id) => setDraftItems((items) => items.filter((i) => i.id !== id));
 
   const submitBudget = () => {
+    if (!requireManager()) return;
     if (!budgetTitle.trim() || draftItems.length === 0) return;
     const budget = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -1025,6 +1117,7 @@ function MeatShareLedger({ orgName, appTitle, tagline } = {}) {
   };
 
   const decideItem = (budget, item, decision) => {
+    if (!requireManager()) return;
     if (itemDecisionDraft.pin.trim() !== (settings.approverPin || "").trim()) {
       setPinError("PIN doesn't match. Ask the approver to confirm and try again.");
       return;
@@ -1067,7 +1160,8 @@ function MeatShareLedger({ orgName, appTitle, tagline } = {}) {
   };
 
   const retirePayment = (budget, item) => {
-    const amt = parseFloat(retireDraft.amount);
+    if (!requireManager()) return;
+    const amt = parseMoney(retireDraft.amount);
     const retiredSoFar = item.retirements.reduce((s, r) => s + r.amount, 0);
     const remaining = item.amountRequested - retiredSoFar;
     if (!amt || amt <= 0) return;
@@ -1138,6 +1232,7 @@ function MeatShareLedger({ orgName, appTitle, tagline } = {}) {
   };
 
   const importBackup = (e) => {
+    if (!requireManager()) return;
     const file = e.target.files && e.target.files[0];
     if (!file) return;
     const reader = new FileReader();
@@ -1591,6 +1686,7 @@ h1 { font-family:'Fraunces',serif; font-size:26px; margin:2px 0 0; }
   };
 
   const saveBusinessProfile = async () => {
+    if (!requireManager()) return;
     const next = {
       name: profileDraft.name.trim(),
       phone: profileDraft.phone.trim(),
@@ -1906,7 +2002,8 @@ h1 { font-family:'Fraunces',serif; font-size:26px; margin:2px 0 0; }
   };
 
   const recordExpense = () => {
-    const amt = parseFloat(expenseForm.amount);
+    if (!requireManager()) return;
+    const amt = parseMoney(expenseForm.amount);
     const cat = categories.expense.some((x) => x.id === expenseForm.category)
       ? expenseForm.category
       : categories.expense[0] && categories.expense[0].id;
@@ -2642,6 +2739,8 @@ h1 { font-family:'Fraunces',serif; font-size:26px; margin:2px 0 0; }
         ))}
       </nav>
 
+      {role === "viewer" && <div style={{ ...styles.errorBanner, background: "#EFEBE0", color: COLORS.ink }}>View-only access. Contact an organization owner if you need to record or update ledger entries.</div>}
+      {role === "staff" && <div style={{ ...styles.errorBanner, background: "#EFEBE0", color: COLORS.ink }}>Staff access: you can record sales and dispatches. An owner or accountant manages expenses, approvals, payments, settings, and edits.</div>}
       {saveError && <div style={styles.errorBanner}>{saveError}</div>}
       {!loaded && <div style={styles.loading}>Loading ledger…</div>}
 
@@ -5018,7 +5117,7 @@ function App() {
   </form></div>;
 
   if (status?.kind === "company_user" && status.status === "active" && status.memberStatus === "active") {
-    return <div><div className="no-print" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 16px", background: "#21281F", color: "#fff", fontSize: 12 }}><span>{status.organizationName}</span><button onClick={signOut} style={{ background: "transparent", border: "1px solid #545C51", color: "#fff", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer" }}>Log Out</button></div><MeatShareLedger key={status.organizationId} orgName={status.organizationName} /></div>;
+    return <div><div className="no-print" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 16px", background: "#21281F", color: "#fff", fontSize: 12 }}><span>{status.organizationName}</span><button onClick={signOut} style={{ background: "transparent", border: "1px solid #545C51", color: "#fff", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer" }}>Log Out</button></div><MeatShareLedger key={status.organizationId} orgName={status.organizationName} role={status.role} /></div>;
   }
 
   return <div style={center}><form style={card} onSubmit={(event) => { event.preventDefault(); const f = new FormData(event.currentTarget); if (resetMode) requestPasswordReset(String(f.get("email"))); else submitLogin(String(f.get("email")), String(f.get("password"))); }}>

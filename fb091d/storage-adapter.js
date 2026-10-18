@@ -25,17 +25,30 @@
   }
   function idOf(item) { return String(item.id); }
 
+  function stableJson(value) {
+    if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+    if (value && typeof value === "object") {
+      return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(",")}}`;
+    }
+    return JSON.stringify(value);
+  }
+
   async function replaceRows(table, orgId, rows) {
-    const existing = await window.sbClient.from(table).select("id").eq("organization_id", orgId);
+    const existing = await window.sbClient.from(table).select("id,payload").eq("organization_id", orgId);
     fail(existing.error);
+    const existingById = new Map((existing.data || []).map((row) => [String(row.id), row]));
     const incoming = new Set(rows.map((row) => String(row.id)));
     const removed = (existing.data || []).filter((row) => !incoming.has(String(row.id)));
     for (const row of removed) {
       const deleted = await window.sbClient.from(table).delete().eq("organization_id", orgId).eq("id", row.id);
       fail(deleted.error);
     }
-    if (rows.length) {
-      const saved = await window.sbClient.from(table).upsert(rows, { onConflict: "organization_id,id" });
+    const changed = rows.filter((row) => {
+      const previous = existingById.get(String(row.id));
+      return !previous || stableJson(previous.payload) !== stableJson(row.payload);
+    });
+    if (changed.length) {
+      const saved = await window.sbClient.from(table).upsert(changed, { onConflict: "organization_id,id" });
       fail(saved.error);
     }
   }
