@@ -1538,6 +1538,8 @@ function MeatShareLedger({ orgName, appTitle, tagline, role = "viewer" } = {}) {
   }, [transactions]);
 
   const generateInvestorSnapshot = () => {
+    const generatedAt = new Date();
+    const generatedAtLabel = `${generatedAt.toLocaleString("en-NG", { dateStyle: "medium", timeStyle: "medium", timeZone: "Africa/Lagos" })} WAT`;
     const thisWeek = investorTrend.weeks[investorTrend.weeks.length - 1];
     const thisMonth = investorTrend.months[investorTrend.months.length - 1];
     const maxWeekVal = Math.max(1, ...investorTrend.weeks.map((w) => Math.max(w.sales, w.expenses)));
@@ -1559,11 +1561,14 @@ function MeatShareLedger({ orgName, appTitle, tagline, role = "viewer" } = {}) {
 
     const html = `<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8" />
-<title>${brandEyebrow} — Investor Snapshot</title>
+<title>${brandSlug}-investor-snapshot-${todayStr()}</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;600;700&display=swap');
 body { margin:0; padding:20px 16px 60px; background:#F6F3EC; color:#21281F; font-family:'Inter',sans-serif; }
 .wrap { max-width: 640px; margin: 0 auto; }
+.toolbar { max-width:640px; margin:0 auto 14px; display:flex; justify-content:flex-end; gap:8px; }
+.toolbar button { border:1px solid #21281F; border-radius:7px; background:#21281F; color:#fff; padding:9px 13px; font:600 13px Inter,sans-serif; cursor:pointer; }
+.toolbar .secondary { background:#fff; color:#21281F; }
 .masthead { text-align:center; border-bottom:2px solid #21281F; padding-bottom:18px; margin-bottom:22px; }
 .eyebrow { font-size:11px; letter-spacing:0.18em; color:#C9A227; font-weight:700; }
 h1 { font-family:'Fraunces',serif; font-size:30px; margin:2px 0 4px; }
@@ -1577,12 +1582,14 @@ h1 { font-family:'Fraunces',serif; font-size:30px; margin:2px 0 4px; }
 .legend span { display:inline-flex; align-items:center; gap:5px; margin-right:14px; }
 .dot { width:8px; height:8px; border-radius:2px; display:inline-block; }
 .footer { font-size:11px; color:#7A7566; text-align:center; margin-top:30px; }
+@page { size:auto; margin:14mm; }
+@media print { body { padding:0; background:#fff; print-color-adjust:exact; -webkit-print-color-adjust:exact; } .toolbar { display:none !important; } .wrap { max-width:none; } .card { break-inside:avoid; } }
 </style>
-</head><body><div class="wrap">
+</head><body><div class="toolbar"><button class="secondary" onclick="window.close()">Close</button><button onclick="window.print()">Print / Save as PDF</button></div><div class="wrap">
   <div class="masthead">
     <div class="eyebrow">${brandEyebrow}</div>
     <h1>Investor Snapshot</h1>
-    <div class="sub">Generated ${fmtDate(new Date())} · Read-only performance summary</div>
+    <div class="sub">Generated ${generatedAtLabel} · Read-only performance summary</div>
   </div>
 
   <div class="cards">
@@ -1603,20 +1610,16 @@ h1 { font-family:'Fraunces',serif; font-size:30px; margin:2px 0 4px; }
   ${investorTrend.months.map((m) => barRow(m.label, m.sales, m.expenses, m.profit, maxMonthVal)).join("")}
 
   <div class="footer">Prepared for informational purposes. Figures reflect company-operated activity only.</div>
-</div></body></html>`;
+</div><script>window.addEventListener("load",function(){setTimeout(function(){window.print();},350);});</script></body></html>`;
 
     try {
-      const blob = new Blob([html], { type: "text/html" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${brandSlug}-investor-snapshot-${todayStr()}.html`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      const preview = window.open("", "_blank");
+      if (!preview) throw new Error("Allow pop-ups for this site, then try again.");
+      preview.document.open();
+      preview.document.write(html);
+      preview.document.close();
     } catch (e) {
-      setSaveError("Could not generate investor snapshot.");
+      setSaveError(e instanceof Error ? e.message : "Could not generate investor snapshot.");
     }
   };
 
@@ -4214,7 +4217,7 @@ h1 { font-family:'Fraunces',serif; font-size:26px; margin:2px 0 0; }
               Print
             </button>
             <button onClick={generateInvestorSnapshot} style={{ ...styles.printBtn, borderColor: COLORS.gold, color: COLORS.gold }}>
-              Investor Snapshot
+              Print Investor Snapshot / PDF
             </button>
           </div>
 
@@ -4875,7 +4878,10 @@ function App() {
   const [requests, setRequests] = useState([]);
   const [organizations, setOrganizations] = useState([]);
   const path = window.location.pathname.replace(/\/$/, "") || "/login";
-  const adminRoute = path === "/super-admin/login";
+  const adminRoute = path === "/admin/login";
+  const superAdminRoute = path === "/super-admin/login";
+  const platformAdminRoute = adminRoute || superAdminRoute;
+  const expectedAdminRole = superAdminRoute ? "super_admin" : "admin";
   const signupRoute = path === "/signup";
 
   const loadAccount = async (supabase, token) => {
@@ -4913,7 +4919,7 @@ function App() {
         const { data } = await supabase.auth.getSession();
         if (data.session) {
           const account = await loadAccount(supabase, data.session.access_token);
-          if (account.kind === "platform_admin" && adminRoute) await loadAdminData(supabase, data.session.access_token);
+          if (account.kind === "platform_admin" && platformAdminRoute && account.role === expectedAdminRole && data.session.user?.app_metadata?.force_password_reset !== true) await loadAdminData(supabase, data.session.access_token);
         }
       } catch (e) { setError(e.message || "Could not connect to the service."); }
       finally { setBusy(false); }
@@ -4969,11 +4975,14 @@ function App() {
       if (loginError || !data.session) throw loginError || new Error("Login failed.");
       if (data.user?.app_metadata?.force_password_reset === true) setPasswordResetRequired(true);
       const account = await loadAccount(client, data.session.access_token);
-      if (adminRoute) {
-        if (account.kind !== "platform_admin") { await signOut(); throw new Error("This account is not authorized for the super-admin portal."); }
+      if (platformAdminRoute) {
+        if (account.kind !== "platform_admin" || account.role !== expectedAdminRole) {
+          await signOut();
+          throw new Error(`This account is not authorized for the ${superAdminRoute ? "super-admin" : "platform-admin"} portal.`);
+        }
         await loadAdminData(client, data.session.access_token);
       } else if (account.kind === "platform_admin") {
-        setNotice("Super-admin account verified. Use the separate super-admin portal.");
+        setNotice(`Platform account verified. Sign in at ${account.role === "super_admin" ? "/super-admin/login" : "/admin/login"}.`);
       }
     } catch (e) { setError(e.message || "Login failed."); }
     finally { setBusy(false); }
@@ -5002,7 +5011,8 @@ function App() {
   const requestPasswordReset = async (email) => {
     setError(""); setNotice(""); setBusy(true);
     try {
-      const { error: resetError } = await client.auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/login` });
+      const resetPath = superAdminRoute ? "/super-admin/login" : adminRoute ? "/admin/login" : "/login";
+      const { error: resetError } = await client.auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}${resetPath}` });
       if (resetError) throw resetError;
       setNotice("If the email is registered, a password reset link has been sent.");
     } catch (e) { setError(e.message || "Could not request a password reset."); }
@@ -5019,7 +5029,7 @@ function App() {
         const response = await fetch("/api/auth/complete-password-reset", { method: "POST", headers: { Authorization: `Bearer ${data.session.access_token}` } });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || "Could not complete the required password reset.");
-        if (adminRoute) await loadAdminData(client, data.session.access_token);
+        if (platformAdminRoute) await loadAdminData(client, data.session.access_token);
       }
       setPasswordResetRequired(false); setPasswordRecovery(false); setNotice("Password updated. You can continue.");
     } catch (e) { setError(e.message || "Could not update password."); }
@@ -5049,7 +5059,7 @@ function App() {
   };
 
   const center = { minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#F6F3EC", fontFamily: "'Inter', sans-serif", color: "#21281F", padding: 24 };
-  const card = { width: "100%", maxWidth: adminRoute ? 640 : 380, background: "#fff", border: "1px solid #D8D2C2", borderRadius: 12, padding: 28 };
+  const card = { width: "100%", maxWidth: platformAdminRoute ? 640 : 380, background: "#fff", border: "1px solid #D8D2C2", borderRadius: 12, padding: 28 };
   const inputStyle = { display: "block", width: "100%", marginTop: 4, padding: "10px", borderRadius: 8, border: "1px solid #D8D2C2", fontSize: 14, boxSizing: "border-box" };
   const buttonStyle = { marginTop: 4, padding: "11px 14px", borderRadius: 8, border: "none", background: "#21281F", color: "#fff", fontWeight: 700, fontSize: 14, cursor: "pointer" };
 
@@ -5062,7 +5072,7 @@ function App() {
     {error && <div style={{ color: "#A6491E", marginTop: 10 }}>{error}</div>}<button disabled={busy} style={{ ...buttonStyle, width: "100%", marginTop: 14 }}>Update password</button>
   </form></div>;
 
-  if (status?.kind === "platform_admin" && adminRoute) {
+  if (status?.kind === "platform_admin" && platformAdminRoute && status.role === expectedAdminRole) {
     return <div style={{ ...center, alignItems: "flex-start" }}><div style={card}>
       <div style={{ fontSize: 11, letterSpacing: "0.18em", color: "#C9A227", fontWeight: 700 }}>SMART BOOK · PLATFORM</div>
       <h2 style={{ fontFamily: "'Fraunces', serif", margin: "4px 0 18px" }}>Company approval requests</h2>
@@ -5104,8 +5114,13 @@ function App() {
     </div></div>;
   }
 
-  if (!signupRoute && ((status?.kind === "company_user" && !(status.status === "active" && status.memberStatus === "active")) || (status?.kind === "platform_admin" && !adminRoute))) {
-    const label = status.status === "pending" ? "Your company is awaiting super-admin approval. Ledger access is disabled." : status.status === "rejected" ? `This company request was rejected${status.rejectionReason ? `: ${status.rejectionReason}` : ". Contact Smart Book support for details."}` : status.status === "suspended" ? "This company account is suspended. Ledger access is disabled." : status.status === "no_organization" ? "This account is not linked to a company yet." : status.kind === "platform_admin" ? "Use the separate super-admin portal to manage company requests." : status.memberStatus === "invited" ? "Accept the company invitation from your email to activate your access." : "Your account does not currently have active company access.";
+  if (status?.kind === "platform_admin" && (!platformAdminRoute || status.role !== expectedAdminRole)) {
+    const correctPortal = status.role === "super_admin" ? "/super-admin/login" : "/admin/login";
+    return <div style={center}><div style={card}><div style={{ fontSize: 11, letterSpacing: "0.18em", color: "#C9A227", fontWeight: 700 }}>SMART BOOK</div><h2 style={{ fontFamily: "'Fraunces', serif", margin: "4px 0 12px" }}>Use your assigned portal</h2><div style={{ background: "#EFEBE0", padding: 14, borderRadius: 8, fontSize: 14, lineHeight: 1.5 }}>This account is assigned to a different Smart Book login portal.</div><a href={correctPortal} style={{ ...buttonStyle, display: "inline-block", textDecoration: "none", marginTop: 16 }}>Continue to your portal</a><button onClick={signOut} style={{ ...buttonStyle, display: "block", marginTop: 12 }}>Log Out</button></div></div>;
+  }
+
+  if (!signupRoute && status?.kind === "company_user" && !(status.status === "active" && status.memberStatus === "active")) {
+    const label = status.status === "pending" ? "Your company is awaiting super-admin approval. Ledger access is disabled." : status.status === "rejected" ? `This company request was rejected${status.rejectionReason ? `: ${status.rejectionReason}` : ". Contact Smart Book support for details."}` : status.status === "suspended" ? "This company account is suspended. Ledger access is disabled." : status.status === "no_organization" ? "This account is not linked to a company yet." : status.memberStatus === "invited" ? "Accept the company invitation from your email to activate your access." : "Your account does not currently have active company access.";
     return <div style={center}><div style={card}><div style={{ fontSize: 11, letterSpacing: "0.18em", color: "#C9A227", fontWeight: 700 }}>SMART BOOK</div><h2 style={{ fontFamily: "'Fraunces', serif", margin: "4px 0 12px" }}>Account status</h2><div style={{ background: "#EFEBE0", padding: 14, borderRadius: 8, fontSize: 14, lineHeight: 1.5 }}>{label}</div><button onClick={signOut} style={{ ...buttonStyle, marginTop: 16 }}>Log Out</button></div></div>;
   }
 
@@ -5121,14 +5136,12 @@ function App() {
   }
 
   return <div style={center}><form style={card} onSubmit={(event) => { event.preventDefault(); const f = new FormData(event.currentTarget); if (resetMode) requestPasswordReset(String(f.get("email"))); else submitLogin(String(f.get("email")), String(f.get("password"))); }}>
-    <div style={{ textAlign: "center", marginBottom: 20 }}><div style={{ fontSize: 11, letterSpacing: "0.18em", color: "#C9A227", fontWeight: 700 }}>SMART BOOK</div><div style={{ fontFamily: "'Fraunces', serif", fontSize: 24, fontWeight: 700, marginTop: 2 }}>{adminRoute ? "Super Admin" : "The Ledger"}</div></div>
+    <div style={{ textAlign: "center", marginBottom: 20 }}><div style={{ fontSize: 11, letterSpacing: "0.18em", color: "#C9A227", fontWeight: 700 }}>SMART BOOK</div><div style={{ fontFamily: "'Fraunces', serif", fontSize: 24, fontWeight: 700, marginTop: 2 }}>{superAdminRoute ? "Super Admin" : adminRoute ? "Platform Admin" : "The Ledger"}</div></div>
     <label style={{ display: "block", fontSize: 12, color: "#7A7566", fontWeight: 600 }}>Email<input name="email" type="email" required style={inputStyle} /></label>
     {!resetMode && <label style={{ display: "block", fontSize: 12, color: "#7A7566", fontWeight: 600, marginTop: 12 }}>Password<input name="password" type="password" required style={inputStyle} /></label>}
     {error && <div style={{ color: "#A6491E", fontSize: 12, marginTop: 10 }}>{error}</div>}{notice && <div style={{ color: "#2F5233", fontSize: 12, marginTop: 10 }}>{notice}</div>}
     <button disabled={busy} style={{ ...buttonStyle, width: "100%", marginTop: 14 }}>{busy ? "Checking…" : resetMode ? "Send reset link" : "Log In"}</button>
     <div style={{ fontSize: 12, marginTop: 12 }}><button type="button" onClick={() => { setResetMode(!resetMode); setError(""); setNotice(""); }} style={{ border: 0, background: "none", color: "#7A7566", padding: 0, cursor: "pointer", textDecoration: "underline" }}>{resetMode ? "Back to login" : "Forgot password?"}</button></div>
-    {!adminRoute && <div style={{ fontSize: 12, marginTop: 14 }}><a href="/signup">Have an invitation? Accept it</a></div>}
-    {!adminRoute && <div style={{ fontSize: 11, marginTop: 16 }}><a href="/super-admin/login">Platform admin</a></div>}
   </form></div>;
 }
 

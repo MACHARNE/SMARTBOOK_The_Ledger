@@ -25,14 +25,15 @@ The application source is maintained in Git and deployed to Vercel. Supabase pro
 
 ## 3. Login portals, signup, and user roles
 
-Smart Book has two distinct entry points:
+Smart Book has three distinct login portals:
 
 - **Super-admin portal:** `/super-admin/login` is the separate login route for platform super administrators. There is no public super-admin signup. The first named super-admin account is provisioned through a secure operator process. Super admins review company signup requests, activate or suspend companies, and manage organization-owner onboarding.
-- **Company user portal:** `/login` is for normal organization users. `/signup` accepts invitations only. Company owners are invited and provisioned by a super admin; public visitors cannot create companies or memberships. New organizations remain pending until approved and grant no ledger access before activation.
+- **Platform-admin portal:** `/admin/login` is the separate login route for platform admins invited by a super admin. It does not grant super-admin privileges.
+- **Company user portal:** `/login` is for normal organization users. `/signup` accepts emailed company invitations only; it is not promoted as a public signup link. Company owners are invited and provisioned by a super admin, and company members by their owner. Public visitors cannot create companies or memberships. New organizations remain pending until approved and grant no ledger access before activation.
 
 Company activation never means the super admin sets, sees, or shares a user's password. Supabase Auth handles identity, email verification, invitations, and password reset. User identity verification and company approval are separate states: a verified user still has no company data access while the organization is pending, rejected, or suspended.
 
-Both portals may use the same Vercel deployment and codebase, but must use distinct routes and authorization. A hidden link or frontend-only route check is not a security boundary. Super-admin actions must be authorized server-side or by database policies and recorded in the audit trail.
+All portals may use the same Vercel deployment and codebase, but must use distinct routes and role authorization. A hidden link or frontend-only route check is not a security boundary. Privileged actions must be authorized server-side or by database policies and recorded in the audit trail.
 
 ### 3.1 Signup and activation workflow
 
@@ -157,7 +158,7 @@ Use database constraints and transactions for financial invariants, such as vali
 ## 9. Launch acceptance criteria
 
 1. Super admin invites/provisions a company owner; pending/rejected companies cannot access operational data.
-2. Company users sign in through `/login`; super admins sign in through `/super-admin/login` and have no public signup path.
+2. Company users sign in through `/login`; platform admins through `/admin/login`; super admins through `/super-admin/login`. Neither admin role has a public signup path.
 3. Only an authorized super admin can activate, reject, suspend, or reactivate a company; decisions are audited.
 4. An active organization user can access only organizations they belong to, with permissions limited by their role.
 5. Two test organizations cannot read or modify one another's records, including through direct API requests.

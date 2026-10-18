@@ -17,7 +17,7 @@ The script verifies that Supabase REST requests cannot read/write across organiz
 
 ## Manual acceptance checks
 
-1. Sign in as the initial admin at `/super-admin/login`; confirm the first login forces a password update.
+1. Sign in as the initial super admin at `/super-admin/login`; confirm the first login forces a password update. Invite one `admin` and one `super_admin`; confirm their emails lead to `/admin/login` and `/super-admin/login` respectively, and each role is rejected by the other portal.
 2. Invite an owner, accept the email at `/signup`, and confirm pending status blocks the ledger.
 3. Activate the organization; sign in at `/login` and confirm the original ledger appears with persisted data.
 4. Set a 1-day, 1-week, 1-month, and 1-year trial and confirm each unit/count/end time persists and appears in the admin company list.

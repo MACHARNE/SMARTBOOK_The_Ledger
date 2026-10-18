@@ -13,7 +13,7 @@ export default async function handler(request: Request): Promise<Response> {
   const role = body.role || "admin";
   if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || !["admin", "super_admin"].includes(role)) return Response.json({ error: "Valid email and admin role are required." }, { status: 400 });
   const redirect = process.env.AUTH_EMAIL_REDIRECT_URL ? new URL(process.env.AUTH_EMAIL_REDIRECT_URL) : undefined;
-  if (redirect) redirect.pathname = "/super-admin/login";
+  if (redirect) redirect.pathname = role === "super_admin" ? "/super-admin/login" : "/admin/login";
   const { data, error } = await adminClient.auth.admin.inviteUserByEmail(email, { redirectTo: redirect?.toString() });
   if (error || !data.user) return Response.json({ error: error?.message || "Could not invite admin." }, { status: 400 });
   const forcedReset = await adminClient.auth.admin.updateUserById(data.user.id, { app_metadata: { ...data.user.app_metadata, force_password_reset: true } });
