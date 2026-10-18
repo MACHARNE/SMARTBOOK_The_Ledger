@@ -381,19 +381,6 @@ function MeatShareLedger({ orgName, appTitle, tagline } = {}) {
     })();
   }, []);
 
-  useEffect(() => {
-    if (!client || !status?.organizationId) return;
-    const refreshAccess = async () => {
-      const { data } = await client.auth.getSession();
-      if (!data.session) { setStatus(null); window.storage = null; return; }
-      try { await loadAccount(client, data.session.access_token); }
-      catch (e) { setError(e.message || "Could not refresh company access."); }
-    };
-    const timer = window.setInterval(refreshAccess, 30000);
-    window.addEventListener("focus", refreshAccess);
-    return () => { window.clearInterval(timer); window.removeEventListener("focus", refreshAccess); };
-  }, [client, status?.organizationId]);
-
   const persist = useCallback(async (next) => {
     setTransactions(next);
     try {
@@ -4833,6 +4820,19 @@ function App() {
       finally { setBusy(false); }
     })();
   }, []);
+
+  useEffect(() => {
+    if (!client || !status?.organizationId) return;
+    const refreshAccess = async () => {
+      const { data } = await client.auth.getSession();
+      if (!data.session) { setStatus(null); window.storage = null; return; }
+      try { await loadAccount(client, data.session.access_token); }
+      catch (e) { setError(e.message || "Could not refresh company access."); }
+    };
+    const timer = window.setInterval(refreshAccess, 30000);
+    window.addEventListener("focus", refreshAccess);
+    return () => { window.clearInterval(timer); window.removeEventListener("focus", refreshAccess); };
+  }, [client, status?.organizationId]);
 
   const loadRequests = async (supabase, token) => {
     const response = await fetch("/api/admin/requests", { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" });
