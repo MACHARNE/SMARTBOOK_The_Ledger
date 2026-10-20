@@ -11,6 +11,7 @@ test("super admin overview uses real response counts and clear navigation", asyn
   await expect(page.getByRole("dialog")).toHaveCount(0);
 });
 for (const role of ["admin", "super_admin"]) test(`${role} can sign in with a password and use all management controls`, async ({ page }) => {
+  const errors = []; page.on("pageerror", error => errors.push(error.message));
   await mockAdminWorkspace(page, role);
   await page.goto(`/${role === "admin" ? "admin" : "super-admin"}/login`);
   await page.getByLabel("Email", { exact: true }).fill("paul@example.test");
@@ -26,6 +27,10 @@ for (const role of ["admin", "super_admin"]) test(`${role} can sign in with a pa
   await nav(page, "Your access").click(); await expect(page.getByRole("heading", { name: "Platform admin permissions" })).toBeVisible();
   await expect(page.getByText("You have monitoring access.", { exact: false })).toHaveCount(0);
   await expect(page.getByText("Included", { exact: true })).toHaveCount(6);
+  await page.getByRole("button", { name: "Log out of platform", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Log In", exact: true })).toBeVisible();
+  expect(await page.evaluate(async () => (await window.sbClient.auth.getSession()).data.session)).toBeNull();
+  expect(errors).toEqual([]);
 });
 test("company search, status filters and pagination are server driven", async ({ page }) => {
   const fixture = await mockAdminWorkspace(page); await fixture.goto("companies");

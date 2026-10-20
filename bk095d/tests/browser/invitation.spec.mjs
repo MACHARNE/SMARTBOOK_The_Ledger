@@ -83,3 +83,13 @@ test("expired invitations explain how to recover without a password form", async
   await expect(page.getByText(/This email link has expired/)).toBeVisible();
   await expect(page.getByLabel("Create password (12 characters minimum)")).toHaveCount(0);
 });
+
+test("company logout clears the session without a browser error", async ({page}) => {
+  const errors = []; page.on("pageerror", error => errors.push(error.message));
+  const fixture = await mockServices(page, "company_user", "owner", false);
+  await page.goto(`/login${fixture.fragment}`);
+  await page.getByRole("button", {name:"Log Out",exact:true}).click();
+  await expect(page.getByRole("button", {name:"Log In",exact:true})).toBeVisible();
+  expect(await page.evaluate(async () => (await window.sbClient.auth.getSession()).data.session)).toBeNull();
+  expect(errors).toEqual([]);
+});

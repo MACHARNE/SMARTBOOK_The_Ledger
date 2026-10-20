@@ -99,8 +99,6 @@ export default function App() {
     setStatus(null);
     setPasswordResetRequired(false);
     setInvitationReady(false);
-    setRequests([]);
-    setOrganizations([]);
     setNotice("");
   };
 
