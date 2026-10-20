@@ -6,6 +6,8 @@
     { "source": "/api/(.*)", "destination": "/api/index?route=$1" },
     { "source": "/", "destination": "/fb091d/index.html" },
     { "source": "/signup", "destination": "/fb091d/index.html" },
+    { "source": "/auth/invite", "destination": "/fb091d/index.html" },
+    { "source": "/auth/callback", "destination": "/fb091d/index.html" },
     { "source": "/login", "destination": "/fb091d/index.html" },
     { "source": "/admin/login", "destination": "/fb091d/index.html" },
     { "source": "/super-admin/login", "destination": "/fb091d/index.html" }

@@ -28,6 +28,7 @@ const routes: Record<string, Handler> = {
   "POST /api/org/accept-invitation": acceptInvitation,
   "POST /api/org/invite": orgMembers,
   "POST /api/org/members": orgMembers,
+  "GET /api/org/members": orgMembers,
 };
 
 export default async function route(request: Request): Promise<Response> {

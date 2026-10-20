@@ -36,6 +36,6 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
   } catch (error) {
     console.error("API initialization or request failed", error);
     res.writeHead(500, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
-    res.end(JSON.stringify({ error: "The API is not configured correctly. Check the Supabase environment variables in Vercel." }));
+    res.end(JSON.stringify({ error: "The request could not be completed. Please retry or contact support." }));
   }
 }

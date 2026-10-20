@@ -15,3 +15,8 @@ build/
 Thumbs.db
 .idea/
 .vscode/
+
+# Local verification output and task helpers
+test-results/
+playwright-report/
+.tools/

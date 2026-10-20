@@ -1,9 +1,24 @@
 import { adminClient, bearerToken, requireOrgOwner } from "../_lib/supabase.js";
+import { prepareInvitation, sendPreparedInvitation, invitationFailure } from "../_lib/invitations.js";
 
 export default async function handler(request: Request): Promise<Response> {
-  if (request.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405 });
+  if (!["GET", "POST"].includes(request.method)) return Response.json({ error: "Method not allowed" }, { status: 405 });
   const token = bearerToken(request);
   if (!token) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  if (request.method === "GET") {
+    const orgId = new URL(request.url).searchParams.get("organizationId");
+    if (!orgId) return Response.json({ error: "Organization ID is required." }, { status: 400 });
+    try { await requireOrgOwner(token, orgId); } catch { return Response.json({ error: "Forbidden" }, { status: 403 }); }
+    const page = Math.max(0, Number(new URL(request.url).searchParams.get("page")) || 0);
+    const result = await adminClient.from("organization_members").select("user_id,role,status,created_at").eq("organization_id", orgId).order("created_at").order("user_id").range(page * 50, page * 50 + 50);
+    if (result.error) return Response.json({ error: "Could not load company members." }, { status: 500 });
+    const members = await Promise.all((result.data || []).slice(0, 50).map(async member => {
+      const user = await adminClient.auth.admin.getUserById(member.user_id);
+      if (user.error) throw new Error("Could not load member identity.");
+      return { ...member, email: user.data.user.email };
+    }));
+    return Response.json({ members, hasMore: (result.data?.length || 0) > 50 }, { headers: { "Cache-Control": "no-store" } });
+  }
   let body: { organizationId?: string; memberId?: string; email?: string; role?: string; action?: string };
   try { body = await request.json() as typeof body; } catch { return Response.json({ error: "Invalid JSON body" }, { status: 400 }); }
   const path = new URL(request.url).pathname;
@@ -17,16 +32,20 @@ export default async function handler(request: Request): Promise<Response> {
     const email = body.email?.trim().toLowerCase();
     const role = body.role || "staff";
     if (!email || email.length > 320 || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || !["accountant", "staff", "viewer"].includes(role)) return Response.json({ error: "Valid email and member role are required." }, { status: 400 });
-    const redirect = process.env.AUTH_EMAIL_REDIRECT_URL ? new URL(process.env.AUTH_EMAIL_REDIRECT_URL) : undefined;
-    if (redirect) redirect.pathname = "/signup";
-    const { data, error } = await adminClient.auth.admin.inviteUserByEmail(email, { redirectTo: redirect?.toString() });
-    if (error || !data.user) return Response.json({ error: error?.message || "Could not invite member." }, { status: 400 });
-    const saved = await adminClient.rpc("set_member_status", { p_actor_id: actorId, p_org_id: body.organizationId, p_user_id: data.user.id, p_status: "invited", p_role: role });
-    if (saved.error) return Response.json({ error: saved.error.message }, { status: 400 });
-    return Response.json({ invited: true, email, role }, { status: 201 });
+    try {
+      const user = await prepareInvitation(email);
+      const saved = await adminClient.rpc("set_member_status", { p_actor_id: actorId, p_org_id: body.organizationId, p_user_id: user.id, p_status: "invited", p_role: role });
+      if (saved.error) throw new Error(saved.error.message);
+      await sendPreparedInvitation(request, user);
+      return Response.json({ invited: true, email, role }, { status: 201 });
+    } catch (error) { return invitationFailure(error); }
   }
+
   if (!body.memberId || !["revoke", "change-role"].includes(body.action || "")) return Response.json({ error: "Member and supported action are required." }, { status: 400 });
-  const result = await adminClient.rpc("set_member_status", { p_actor_id: actorId, p_org_id: body.organizationId, p_user_id: body.memberId, p_status: body.action === "revoke" ? "revoked" : "active", p_role: body.action === "change-role" ? body.role : null });
+  const current = await adminClient.from("organization_members").select("status").eq("organization_id", body.organizationId).eq("user_id", body.memberId).maybeSingle();
+  if (current.error || !current.data) return Response.json({ error: "Member not found." }, { status: 404 });
+  if (body.action === "change-role" && current.data.status === "revoked") return Response.json({ error: "Invite the revoked member again before changing their role." }, { status: 400 });
+  const result = await adminClient.rpc("set_member_status", { p_actor_id: actorId, p_org_id: body.organizationId, p_user_id: body.memberId, p_status: body.action === "revoke" ? "revoked" : current.data.status, p_role: body.action === "change-role" ? body.role : null });
   if (result.error) return Response.json({ error: result.error.message }, { status: 400 });
   return Response.json({ result: result.data });
 }

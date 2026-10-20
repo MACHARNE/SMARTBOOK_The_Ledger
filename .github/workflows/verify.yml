@@ -1,0 +1,26 @@
+name: Verify Smart Book
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm --workspace bk095d run check:frontend
+      - run: npm --workspace bk095d run check:database
+      - run: npm --workspace bk095d run check:auth-callback
+      - run: npm --workspace bk095d run check:documents
+      - run: npm --workspace bk095d run check:admin-invite
+      - run: npm --workspace bk095d run check:password-setup
+      - run: npm --workspace bk095d run check:export
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser

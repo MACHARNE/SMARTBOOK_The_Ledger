@@ -6,6 +6,12 @@
     "typecheck": "tsc --noEmit",
     "check:frontend": "node scripts/check-frontend-syntax.cjs",
     "check:export": "node --import tsx scripts/check-export.ts",
+    "check:admin-invite": "node --import tsx scripts/check-admin-invite.ts",
+    "check:password-setup": "node --import tsx scripts/check-password-setup.ts",
+    "check:database": "node scripts/check-ledger-database.mjs",
+    "check:auth-callback": "node scripts/check-auth-callback.mjs",
+    "check:documents": "node scripts/check-documents.cjs",
+    "diagnose:auth": "node --use-system-ca --env-file=../.env scripts/diagnose-auth.cjs",
     "apply:migrations": "node --use-system-ca --env-file=../.env scripts/apply-migrations.cjs",
     "verify:rls": "node --use-system-ca --env-file=../.env --import tsx scripts/verify-rls.ts"
   },
@@ -14,6 +20,8 @@
   },
   "devDependencies": {
     "@babel/parser": "^8.0.7",
+    "@electric-sql/pglite": "^0.5.10",
+    "@playwright/test": "^1.64.1",
     "@types/node": "^22.18.0",
     "pg": "^8.23.1",
     "tsx": "^4.20.5",

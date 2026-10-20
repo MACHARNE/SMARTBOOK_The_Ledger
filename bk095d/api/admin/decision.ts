@@ -1,4 +1,4 @@
-import { adminClient, bearerToken, requirePlatformAdmin } from "../_lib/supabase.js";
+import { adminClient, bearerToken, requireSuperAdmin } from "../_lib/supabase.js";
 
 type DecisionBody = { requestId?: string; decision?: "activate" | "reject" | "suspend" | "reactivate"; reason?: string };
 
@@ -8,7 +8,7 @@ export default async function handler(request: Request): Promise<Response> {
   if (!token) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
   let actorId: string;
-  try { actorId = await requirePlatformAdmin(token); }
+  try { actorId = await requireSuperAdmin(token); }
   catch (error) {
     const message = error instanceof Error ? error.message : "Unauthorized";
     return Response.json({ error: message }, { status: message === "Forbidden" ? 403 : 401 });

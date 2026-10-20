@@ -1,12 +1,13 @@
 # Applying the Supabase schema
 
-The canonical migrations live in `supabase/migrations/` and are applied by the Supabase CLI. The CLI tracks them in `supabase_migrations.schema_migrations`; do not use the legacy `smartbook_schema_migrations` table.
+The canonical migrations are in `supabase/migrations/`. Supabase CLI records versions in `supabase_migrations.schema_migrations`. Do not modify a migration that has already been applied, use the legacy history table, or keep a second SQL copy.
 
-1. Store `SUPABASE_ACCESS_TOKEN` in the ignored local `.env`.
-2. Link the repository to the intended project: `npx supabase@2.121.0 link --project-ref <project-ref>`.
-3. Review pending work: `npx supabase@2.121.0 db push --workdir . --project-ref <project-ref> --dry-run`.
-4. Apply migrations: `npm --workspace bk095d run apply:migrations` from the repository root.
-5. Confirm all migrations are recorded: `npx supabase@2.121.0 migration list --workdir . --project-ref <project-ref>`.
-6. Run `npm --workspace bk095d run verify:rls` against the intended Supabase project.
+1. Set `SUPABASE_ACCESS_TOKEN` in the ignored local `.env` and link the CLI to the intended project with `npx supabase@2.121.0 link --project-ref <ref>`.
+2. Run `npm --workspace bk095d run check:database` to install all migrations in local embedded PostgreSQL and verify financial/security behavior.
+3. Review pending migrations with `npm --workspace bk095d run apply:migrations -- --dry-run`.
+4. Apply deliberately with `npm --workspace bk095d run apply:migrations` and verify the recorded history. The wrapper uses the linked project, not `POSTGRES_URL`.
+5. Run hosted fixture tests only in the separately configured staging project. `verify:rls` always refuses production.
 
-The production project previously had migrations `0001`, `0002`, and `0003` applied. Migration `0004_role_scoped_ledger_access.sql` adds the role-aware data policies; apply and verify it before relying on the new company-role restrictions. Never paste `.env`, a database password, or an access token into SQL Editor or Git.
+Migration 0005 repairs legacy NULL Auth fields. Migration 0006 introduces transactional writes, trusted audits, owner budget decisions, super-admin lifecycle checks, and recoverable onboarding provisioning. It revokes direct authenticated writes: old open application tabs must be refreshed after the matching frontend release. Coordinate the database and frontend deployment; do not restore the old frontend alone after this migration.
+
+Never print, paste into SQL, or commit an environment file, database password, service-role key, or access token.

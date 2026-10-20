@@ -12,6 +12,7 @@ const result = spawnSync(command, [
   "--workdir",
   "..",
   "--skip-vault",
+  ...(process.argv.includes("--dry-run") ? ["--dry-run"] : []),
 ], {
   env: process.env,
   stdio: "inherit",

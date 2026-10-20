@@ -1,12 +1,15 @@
 {
   "name": "smart-book-ledger",
   "private": true,
+  "type": "module",
   "workspaces": [
     "bk095d"
   ],
   "scripts": {
     "build": "node scripts/build-frontend.cjs",
-    "typecheck": "npm --workspace bk095d run typecheck"
+    "typecheck": "npm --workspace bk095d run typecheck",
+    "test:browser": "playwright test",
+    "preview": "node scripts/serve-preview.cjs"
   },
   "dependencies": {
     "react": "^18.2.0",

@@ -1,32 +1,98 @@
 # Verification plan
 
-## Automated checks
+## Environment boundaries
 
-From the repository root:
+- **Production Supabase project `twhnwowshcowqldpzwbo`:** run only the read-only cross-tenant check below and the manual role matrix. Do not run `verify:rls`, any other automated test that creates or changes Auth users or organization data, or any production override flag.
+- **Staging Supabase project:** run the automated RLS suite only after a separate staging project and its credentials have been provisioned. Use staging credentials in the ignored `.env`; never point the suite at production. The suite creates temporary Auth users, organizations, and ledger rows, then attempts cleanup.
+- Migration `0004_role_scoped_ledger_access.sql` is already applied to production and recorded in `supabase_migrations.schema_migrations`. Do not reapply it. Any future policy change must be a new migration.
+
+## Non-mutating local checks
+
+From the repository root, these checks do not connect to Supabase or alter database data:
 
 ```sh
 npm --workspace bk095d run typecheck
 npm --workspace bk095d run check:frontend
 npm --workspace bk095d run check:export
+```
+
+## Automated RLS checks — staging only
+
+Run this only when `.env` contains credentials for the separately provisioned staging project:
+
+```sh
 npm --workspace bk095d run verify:rls
 ```
 
-Configure Supabase credentials in the ignored `.env` and apply all migrations first. The RLS script creates disposable Auth users and organizations, then removes them in `finally` cleanup. On the production project, it refuses to run if any organization already exists unless `SMARTBOOK_ALLOW_PRODUCTION_RLS_TESTS=true` is set after arranging a maintenance window and backup. Set `SMARTBOOK_BASE_URL` to a preview deployment to include API authorization checks.
+The suite creates disposable Auth users, organizations, and sample ledger rows, exercises tenant isolation and role policies, and removes its test records in cleanup. It can also call a deployment API when `SMARTBOOK_BASE_URL` is configured. Never set `SMARTBOOK_ALLOW_PRODUCTION_RLS_TESTS` for production and never use production credentials for this command. If staging credentials are not available, stop before running it.
 
-The script verifies that Supabase REST requests cannot read/write across organizations; staff can append sales but cannot edit/delete financial rows or record expenses; viewers are read-only; platform admins have no implicit access to tenant ledger tables; pending, rejected, and suspended organizations return no ledger rows and cannot write ledger rows; direct public Auth signup is disabled; public authenticated users cannot write `platform_admins`; non-admin users cannot activate an organization; a company-user JWT is denied by a super-admin API; and `/api/signup` rejects self-service company creation.
+The automated suite covers cross-organization REST access, staff and viewer restrictions, platform-admin isolation, organization-status restrictions, public signup and platform-admin write restrictions, protected admin APIs, and `/api/signup` behavior.
 
-## Manual acceptance checks
+## Production read-only cross-tenant check
 
-1. Sign in as the initial super admin at `/super-admin/login`; confirm the first login forces a password update. Invite one `admin` and one `super_admin`; confirm their emails lead to `/admin/login` and `/super-admin/login` respectively, and each role is rejected by the other portal.
-2. Invite an owner, accept the email at `/signup`, and confirm pending status blocks the ledger.
-3. Activate the organization; sign in at `/login` and confirm the original ledger appears with persisted data.
-4. Set a 1-day, 1-week, 1-month, and 1-year trial and confirm each unit/count/end time persists and appears in the admin company list.
-5. Invite a member, accept the invitation, revoke access, and change a member role. Confirm the audit trail records each change.
-6. Suspend and reactivate the organization; confirm direct REST reads are blocked while suspended.
-7. Spot-check credit settlement, delivered/returned dispatch income, vendor remittance, and commission payments against the preserved ledger behavior.
-8. Confirm day/week/month/year report ranges and verify a company user sees no organization Excel export control.
-9. As a super admin, request `/api/export/org/<organization-id>.xlsx` and confirm a valid workbook downloads.
-10. Inspect built browser assets and deployment variables: no service-role key, initial-admin temporary password, or provisioning secret may be present.
-11. Confirm the applied `0004_role_scoped_ledger_access.sql` migration, then test owner, accountant, staff, and viewer access separately. Staff can add sales and dispatch drafts; owner/accountant approval, expense, payment, setting, edit, and delete actions must be denied to staff and viewers.
+Run this in the browser console while signed in to the production site as an ordinary member of an active organization. It uses the current user's session and the public anon key, makes only `SELECT` requests, and prints status and row counts—not session tokens or ledger data.
 
-The script creates and deletes temporary production records when explicitly run against production. Review cleanup counts after each live run. Do not use it while real organizations are onboarding.
+Use your own organization ID and a real second organization ID known to contain at least one transaction. An unknown or empty organization is not a useful isolation check. Replace both placeholders below before running:
+
+```js
+async function visibleTransactionCount(orgId) {
+  const { data: { session } } = await window.sbClient.auth.getSession();
+  if (!session) throw new Error("Sign in to the production app first.");
+
+  const configResponse = await fetch("/api/config", { cache: "no-store" });
+  if (!configResponse.ok) throw new Error(`/api/config returned ${configResponse.status}`);
+  const config = await configResponse.json();
+
+  const url = new URL("/rest/v1/transactions", config.url);
+  url.search = new URLSearchParams({
+    select: "id",
+    organization_id: `eq.${orgId}`,
+    limit: "1",
+  }).toString();
+
+  const response = await fetch(url, {
+    headers: {
+      apikey: config.anonKey,
+      Authorization: `Bearer ${session.access_token}`,
+    },
+  });
+  const rows = await response.json();
+  if (!response.ok || !Array.isArray(rows)) {
+    throw new Error(`Transaction read returned ${response.status}`);
+  }
+  return { status: response.status, visibleRows: rows.length };
+}
+
+console.log({
+  own: await visibleTransactionCount("YOUR_OWN_ORG_UUID"),
+  other: await visibleTransactionCount("KNOWN_OTHER_ORG_UUID"),
+});
+```
+
+Expected: the own-organization check sees at least one row; the known other organization returns HTTP `200` with `visibleRows: 0`. Do not copy, log, or share the session token.
+
+## Manual role matrix
+
+Use designated test accounts and a dedicated test organization. For production, do not create, edit, or delete test records in a real customer's ledger. Confirm each account belongs to the expected organization and role before testing. Test UI actions and, where noted, verify that a denied action did not change the record.
+
+| Role | Expected access |
+| --- | --- |
+| Owner | Read own organization's ledger; manage members, business settings, categories, stock, and ledger records; approve or reject budgets; settle credit; update dispatches; remit vendors and pay commissions. No access to another organization's data. |
+| Accountant | Read and manage own organization's ledger and settings; manage members and business configuration; approve or reject budgets; settle credit; update dispatches; remit vendors and pay commissions. No access to another organization's data. **The current app and migration allow accountants to approve/reject budgets, while the PRD assigns approval to the owner/approver. Treat this as a known policy/product mismatch, not a passed PRD acceptance check.** |
+| Staff | Read own organization's ledger; create sales, outstanding credit sales, and dispatch drafts. Must be denied expense/procurement entry, credit settlement, edit/delete of financial records, settings/member management, vendor remittance, commission payment, and marking dispatches delivered. No access to another organization's data. |
+| Viewer | Read own organization's ledger only. All create, edit, delete, approval, payment, settings, and member-management actions must be denied. No access to another organization's data. |
+
+For each role, verify both the expected allowed operations and representative denied operations. Record the account role, action, result, and whether the database state changed. Do not use service-role credentials for these checks.
+
+## Application acceptance checks
+
+1. Sign in at `/super-admin/login`; verify required first-login password update. Invite a platform admin and a super admin; verify each email routes to the correct portal and the wrong role cannot sign in there.
+2. Invite an owner, accept the email at `/signup`, and verify a pending organization cannot access its ledger.
+3. Activate the organization; sign in at `/login` and confirm its existing ledger data is present.
+4. Exercise trial durations of one day, one week, one month, and one year; confirm count, unit, end time, and displayed status.
+5. Invite a member, accept the invitation, revoke access, and change a member role. Verify the audit trail records each action.
+6. Verify suspended organizations are blocked from ledger access and that reactivation restores access. Use the designated test organization.
+7. Check credit settlement, delivered and returned dispatch income, vendor remittance, and commission payments against expected ledger totals. Use test records and confirm each action is recorded once.
+8. Confirm day, week, and month report ranges and that company users do not see organization export controls.
+9. As a super admin, verify `/api/export/org/<organization-id>.xlsx` returns a valid workbook.
+10. Inspect built browser assets and deployment variables to ensure service-role keys, initial-admin temporary passwords, and provisioning secrets are not exposed to browsers.

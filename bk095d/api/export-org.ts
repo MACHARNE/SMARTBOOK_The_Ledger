@@ -1,7 +1,7 @@
 import { deflateRawSync } from "node:zlib";
 import { adminClient, bearerToken, requireSuperAdmin } from "./_lib/supabase.js";
 
-const TABLES = ["business_profiles","categories","transactions","credit_sales","credit_payments","budgets","budget_items","audit_events","stock_items","stock_movements","commission_roles","workers","dispatches","vendor_remittances","commission_payments"] as const;
+const TABLES = ["business_profiles","categories","transactions","credit_sales","credit_payments","budgets","budget_items","budget_retirements","audit_events","stock_items","stock_movements","commission_roles","workers","dispatches","vendor_remittances","commission_payments"] as const;
 
 const xml = (value: unknown) => String(value ?? "").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&apos;");
 const column = (index: number) => { let out = ""; for (let n = index + 1; n; n = Math.floor((n - 1) / 26)) out = String.fromCharCode(65 + (n - 1) % 26) + out; return out; };
@@ -51,17 +51,9 @@ export default async function handler(request: Request): Promise<Response> {
   const orgId = match[1];
   const { data: org, error: orgError } = await adminClient.from("organizations").select("name").eq("id", orgId).maybeSingle();
   if (orgError || !org) return Response.json({ error: "Organization not found." }, { status: 404 });
-  const exportTables: Array<[string, Record<string, unknown>[]]> = [];
-  for (const table of TABLES) {
-    const rows: Record<string, unknown>[] = [];
-    for (let start = 0; ; start += 1000) {
-      const { data, error } = await adminClient.from(table).select("*").eq("organization_id", orgId).range(start, start + 999);
-      if (error) return Response.json({ error: `Could not export ${table}.` }, { status: 500 });
-      rows.push(...(data || []) as Record<string, unknown>[]);
-      if ((data?.length || 0) < 1000) break;
-    }
-    exportTables.push([table, rows]);
-  }
+  const exported = await adminClient.rpc("export_ledger_data", { p_actor_id: actorId, p_org: orgId });
+  if (exported.error || !exported.data) return Response.json({ error: "Could not prepare a consistent company export." }, { status: 500 });
+  const exportTables: Array<[string, Record<string, unknown>[]]> = TABLES.map(table => [table, exported.data[table] || []]);
   const audit = await adminClient.from("audit_events").insert({ actor_user_id: actorId, action: "organization_exported", entity_type: "organization", entity_id: orgId, details: { organization_name: org.name } });
   if (audit.error) return Response.json({ error: "Export was prepared but could not be audited." }, { status: 500 });
   const bytes = createWorkbook(exportTables);

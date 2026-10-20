@@ -1,27 +1,32 @@
-# Backend — `bk095d`
+# Smart Book backend
 
-Backend implementation area for Supabase authentication, organization signup and activation, organization membership, tenant-scoped data access, and server-side privileged operations.
+TypeScript Vercel API handlers live in `api/`. The canonical, forward-only SQL migrations live in `../supabase/migrations/`; the former duplicate migration directory has been removed.
 
-- `migrations/` — ordered SQL schema and Row Level Security changes.
-- `api/` — protected server-side handlers if required by the implementation.
-- `package.json` / `tsconfig.json` — TypeScript Node.js function setup.
-- `migrations/` — ordered SQL schema and Row Level Security changes.
-- `scripts/verify-rls.ts` — live tenant-isolation and privilege checks (requires a configured Supabase test project).
-- `scripts/check-frontend-syntax.cjs` — syntax-checks the React/JSX embedded in the preserved frontend file.
-- `scripts/apply-migrations.cjs` — applies numbered migrations with a history table and refuses an untracked existing schema.
+Authentication uses Supabase Auth. Company decisions require a super admin. Organization members read authorized data through RLS and `read_ledger_data`; writes use the versioned `save_ledger_data` and server-calculated `perform_ledger_action` functions. Ordinary table writes and client-authored audit inserts are denied. A database transaction includes related records, version checks, and audit events.
 
-Do not place privileged Supabase credentials in frontend files. See the root `PRD.md` and `pre.md` for required behavior and launch criteria.
+Email invitations use `/auth/invite`. Identity preparation and database provisioning happen before delivery; retrying delivery reuses the identity. Existing password holders accept with their existing account. Passwordless accounts create their own password, then sign in at the assigned portal.
 
-The first integration milestone is the signup/approval foundation. It does not replace or redesign the client ledger interface. Supabase project credentials are needed before live login and database integration can be exercised.
+## Local verification
 
-## When project setup is needed
+From the repository root:
 
-The schema and backend contract can be prepared in Git before using the hosted database. Apply all three migrations to a Supabase **test project** and verify email/auth behavior. Configure its project URL, anon key, and server-only service-role key in local environment settings and Vercel. Never send the secret key in chat or commit it. Provision the initial named admin (`edoziemichael90@gmail.com`) once through `/api/admin/provision-initial`, using temporary server-only environment variables and a one-time secret header. The admin must set a new password after first login; remove the provisioning variables after use.
+```sh
+npm ci
+npm run typecheck
+npm --workspace bk095d run check:frontend
+npm --workspace bk095d run check:database
+npm --workspace bk095d run check:auth-callback
+npm --workspace bk095d run check:admin-invite
+npm --workspace bk095d run check:password-setup
+npm --workspace bk095d run check:documents
+npm --workspace bk095d run check:export
+npm run build
+npx playwright install chromium
+npm run test:browser
+```
 
-Use root [`.env.example`](../.env.example) for local variable names. Set Supabase values in Vercel Preview and Production. `SUPABASE_SERVICE_ROLE_KEY` is server-only. Add the base URL and `/signup`, `/login`, `/admin/login`, and `/super-admin/login` paths to Supabase Auth's allowed redirect URLs. Password reset emails use `/login` as the common callback; invitations continue to use each account's assigned portal. Disable open user signups in Supabase Auth; invited users can still be created through admin/member invitation flows. See [initial admin setup](../docs/provision-super-admin.md).
+`check:database` applies every canonical migration to embedded PostgreSQL and exercises financial operations, rollback, duplicates, role restrictions, tenant isolation, and conflicts. It uses no production credentials. Browser checks mock hosted Auth and APIs and send no email.
 
-After all migrations and `.env` are configured against a non-production test project, run `npm --workspace bk095d run verify:rls`. The script creates temporary test users and companies, checks cross-tenant reads/writes, pending/rejected/suspended access, public admin escalation, and self-activation, then removes its fixtures. Set `SMARTBOOK_BASE_URL` to also check non-admin API rejection and public signup denial.
+`verify:rls` creates disposable fixtures only in the separate project identified by `SMARTBOOK_STAGING_PROJECT_REF`. It unconditionally refuses the known production project. Do not use production credentials for fixture tests.
 
-Apply schema changes with `npm --workspace bk095d run apply:migrations`. The local `.env` must contain `POSTGRES_URL` or `POSTGRES_URL_NON_POOLING`; this connection string is never needed in Vercel runtime variables.
-
-The existing client interface remains visually intact. Its entry routes now call these APIs, and its existing `window.storage.get/set` call sites use the Supabase adapter after an active organization session is confirmed. Root `api/` files are Vercel route wrappers that keep implementation code inside `bk095d/api`.
+See `../docs/release-and-verification.md` for deployment, email redirects, migration order, and operational limits.

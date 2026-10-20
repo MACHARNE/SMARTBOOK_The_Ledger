@@ -1,0 +1,7 @@
+.env
+.env.*
+!.env.example
+.tools/
+docs/audit-*/
+test-results/
+playwright-report/
