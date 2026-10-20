@@ -1,4 +1,4 @@
-import { adminClient, bearerToken, requireSuperAdmin } from "../_lib/supabase.js";
+import { adminClient, bearerToken, requirePlatformAdmin } from "../_lib/supabase.js";
 import { prepareInvitation, sendPreparedInvitation, invitationFailure } from "../_lib/invitations.js";
 
 export default async function handler(request: Request): Promise<Response> {
@@ -6,7 +6,7 @@ export default async function handler(request: Request): Promise<Response> {
   const token = bearerToken(request);
   if (!token) return Response.json({ error: "Unauthorized" }, { status: 401 });
   let actorId: string;
-  try { actorId = await requireSuperAdmin(token); }
+  try { actorId = await requirePlatformAdmin(token); }
   catch (e) { return Response.json({ error: e instanceof Error ? e.message : "Unauthorized" }, { status: 403 }); }
   let body: { email?: string; role?: string };
   try { body = await request.json() as typeof body; } catch { return Response.json({ error: "Invalid JSON body" }, { status: 400 }); }

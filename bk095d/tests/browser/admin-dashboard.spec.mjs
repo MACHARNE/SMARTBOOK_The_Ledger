@@ -10,17 +10,22 @@ test("super admin overview uses real response counts and clear navigation", asyn
   await expect(page.getByRole("heading", { name: "Recent activity" })).toBeVisible();
   await expect(page.getByRole("dialog")).toHaveCount(0);
 });
-test("platform admin has monitoring views without privileged controls", async ({ page }) => {
-  const fixture = await mockAdminWorkspace(page, "admin"); await fixture.goto();
-  await expect(page.getByText("You have monitoring access.", { exact: false })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Invite company", exact: true })).toHaveCount(0);
-  await expect(nav(page, "Administrators")).toHaveCount(0);
+for (const role of ["admin", "super_admin"]) test(`${role} can sign in with a password and use all management controls`, async ({ page }) => {
+  await mockAdminWorkspace(page, role);
+  await page.goto(`/${role === "admin" ? "admin" : "super-admin"}/login`);
+  await page.getByLabel("Email", { exact: true }).fill("paul@example.test");
+  await page.getByLabel("Password", { exact: true }).fill("Fixture-password-123!");
+  await page.getByRole("button", { name: "Log In", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Workspace overview" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Invite company", exact: true })).toBeVisible();
+  await expect(nav(page, "Administrators")).toBeVisible();
   await nav(page, "Companies").click(); await page.getByRole("button", { name: "View company", exact: false }).first().click();
   await expect(page.getByRole("dialog")).toBeVisible();
-  await expect(page.getByRole("button", { name: /Approve company|Suspend company|Download Excel|Set trial/ })).toHaveCount(0);
+  for (const name of ["Approve company", "Download Excel", "Set trial"]) await expect(page.getByRole("button", { name, exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Close", exact: true }).click();
   await nav(page, "Your access").click(); await expect(page.getByRole("heading", { name: "Platform admin permissions" })).toBeVisible();
-  expect(fixture.calls.filter(call => call.path === "/api/admin/administrators")).toHaveLength(0);
+  await expect(page.getByText("You have monitoring access.", { exact: false })).toHaveCount(0);
+  await expect(page.getByText("Included", { exact: true })).toHaveCount(6);
 });
 test("company search, status filters and pagination are server driven", async ({ page }) => {
   const fixture = await mockAdminWorkspace(page); await fixture.goto("companies");
@@ -41,8 +46,9 @@ test("trial summary opens only active companies with trials ending in seven days
   await expect(page.getByText("1–2 of 2 companies")).toBeVisible();
   await expect(page.getByRole("cell", { name: /Example Retail/ })).toBeVisible();
 });
-test("reject requires a reason and sends only one confirmed decision", async ({ page }) => {
-  const fixture = await mockAdminWorkspace(page, "super_admin", { holdPath: "/api/admin/decision" }); await fixture.goto("approvals");
+for (const role of ["admin", "super_admin"]) {
+test(`${role}: reject requires a reason and sends only one confirmed decision`, async ({ page }) => {
+  const fixture = await mockAdminWorkspace(page, role, { holdPath: "/api/admin/decision" }); await fixture.goto("approvals");
   await page.getByRole("button", { name: "Review request", exact: false }).first().click();
   await page.getByRole("button", { name: "Reject request", exact: true }).click();
   const reason = page.getByRole("textbox", { name: "Reason", exact: true });
@@ -57,8 +63,8 @@ test("reject requires a reason and sends only one confirmed decision", async ({ 
   await expect(page.getByRole("status", { name: "Action completed" })).toContainText("company request rejected");
   expect(fixture.posts[0].body.reason).toBe("Company details could not be verified.");
 });
-test("failed admin save preserves form values and supports a clear retry", async ({ page }) => {
-  const fixture = await mockAdminWorkspace(page); await fixture.goto(); fixture.failNext("/api/admin/org/provision-owner", "Email delivery is unavailable. Retry to send the invitation.");
+test(`${role}: failed admin save preserves form values and supports a clear retry`, async ({ page }) => {
+  const fixture = await mockAdminWorkspace(page, role); await fixture.goto(); fixture.failNext("/api/admin/org/provision-owner", "Email delivery is unavailable. Retry to send the invitation.");
   await page.getByRole("button", { name: "Invite company", exact: true }).click();
   await page.getByRole("textbox", { name: "Company name", exact: true }).fill("New Company");
   await page.getByRole("textbox", { name: "Owner’s name", exact: true }).fill("Sample Owner");
@@ -69,16 +75,16 @@ test("failed admin save preserves form values and supports a clear retry", async
   await page.getByRole("button", { name: "Send company invitation", exact: true }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0); await expect(page.getByRole("status", { name: "Action completed" })).toContainText("Invitation sent to new@example.test");
 });
-test("decision history shows completed decisions and their reasons", async ({ page }) => {
-  const fixture = await mockAdminWorkspace(page); await fixture.goto("approvals");
+test(`${role}: decision history shows completed decisions and their reasons`, async ({ page }) => {
+  const fixture = await mockAdminWorkspace(page, role); await fixture.goto("approvals");
   await page.getByRole("button", { name: "Decision history", exact: true }).click();
   await page.getByLabel("Decision status").selectOption("rejected");
   await page.getByRole("button", { name: "View details", exact: false }).first().click();
   await expect(page.getByText("Company details could not be verified.", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Approve company", exact: true })).toHaveCount(0);
 });
-test("administrator role and access changes require an explicit dialog", async ({ page }) => {
-  const fixture = await mockAdminWorkspace(page); await fixture.goto("administrators");
+test(`${role}: administrator role and access changes require an explicit dialog`, async ({ page }) => {
+  const fixture = await mockAdminWorkspace(page, role); await fixture.goto("administrators");
   const own = page.getByRole("row").filter({ hasText: "paul@example.test" }); await expect(own.getByRole("button")).toHaveCount(0);
   const support = page.getByRole("row").filter({ hasText: "support@example.test" }); await support.getByRole("button", { name: "Change role", exact: true }).click();
   await page.getByLabel("New role").selectOption("super_admin"); await page.getByRole("button", { name: "Update administrator role", exact: true }).click();
@@ -91,6 +97,31 @@ test("administrator role and access changes require an explicit dialog", async (
   await expect(page.getByRole("status", { name: "Action completed" })).toContainText("Platform access removed");
   await expect(page.getByRole("cell", { name: /support@example.test/ })).toHaveCount(0);
 });
+test(`${role}: administrator invitations preserve the selected role`, async ({ page }) => {
+  const fixture = await mockAdminWorkspace(page, role); await fixture.goto("administrators");
+  await page.getByRole("button", { name: "Invite administrator", exact: true }).click();
+  await page.getByLabel("Email address", { exact: true }).fill("new-admin@example.test");
+  await page.getByRole("dialog").getByLabel("Administrator role", { exact: false }).selectOption("super_admin");
+  await page.getByRole("button", { name: "Send administrator invitation", exact: true }).click();
+  await expect(page.getByRole("status", { name: "Action completed" })).toContainText("Administrator invitation sent");
+  expect(fixture.posts.find(post => post.path === "/api/admin/invite").body).toEqual({ email: "new-admin@example.test", role: "super_admin" });
+});
+test(`${role}: trial updates and workbook downloads complete`, async ({ page }) => {
+  const fixture = await mockAdminWorkspace(page, role); await fixture.goto("companies");
+  await page.getByRole("button", { name: "View company", exact: false }).first().click();
+  await page.getByRole("button", { name: "Set trial", exact: true }).click();
+  await page.getByLabel("Duration", { exact: true }).fill("2");
+  await page.getByLabel("Period", { exact: true }).selectOption("week");
+  await page.getByRole("button", { name: "Update trial", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  expect(fixture.posts.find(post => post.path.endsWith("/set-trial")).body).toEqual({ unit: "week", count: 2 });
+  await page.getByRole("button", { name: "View company", exact: false }).first().click();
+  const download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download Excel", exact: true }).click();
+  expect((await download).suggestedFilename()).toBe("North-Star-Logistics-export.xlsx");
+  await expect(page.getByRole("status", { name: "Action completed" })).toContainText("has been downloaded");
+});
+}
 test("activity filters retain a readable decision trail", async ({ page }) => {
   const fixture = await mockAdminWorkspace(page); await fixture.goto("activity");
   await page.getByLabel("Activity type").selectOption("suspend");

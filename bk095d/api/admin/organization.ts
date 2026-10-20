@@ -1,4 +1,4 @@
-import { adminClient, bearerToken, requirePlatformAdmin, requireSuperAdmin } from "../_lib/supabase.js";
+import { adminClient, bearerToken, requirePlatformAdmin } from "../_lib/supabase.js";
 import { prepareInvitation, sendPreparedInvitation, invitationFailure } from "../_lib/invitations.js";
 
 export default async function handler(request: Request): Promise<Response> {
@@ -15,7 +15,6 @@ export default async function handler(request: Request): Promise<Response> {
   let body: { reason?: string; unit?: string; count?: number; companyName?: string; contactName?: string; email?: string; phone?: string };
   try { body = await request.json() as typeof body; } catch { return Response.json({ error: "Invalid JSON body" }, { status: 400 }); }
   if (action === "provision-owner") {
-    try { await requireSuperAdmin(token); } catch { return Response.json({ error: "Forbidden" }, { status: 403 }); }
     const companyName = body.companyName?.trim();
     const contactName = body.contactName?.trim();
     const email = body.email?.trim().toLowerCase();
@@ -30,7 +29,6 @@ export default async function handler(request: Request): Promise<Response> {
   }
 
   if (["activate", "reject", "suspend", "reactivate"].includes(action)) {
-    try { await requireSuperAdmin(token); } catch { return Response.json({ error: "Forbidden" }, { status: 403 }); }
     if (["reject", "suspend"].includes(action) && !body.reason?.trim()) return Response.json({ error: "A reason is required." }, { status: 400 });
     const { data: req, error: reqError } = await adminClient.from("organization_signup_requests").select("id").eq("organization_id", orgId).maybeSingle();
     if (reqError || !req) return Response.json({ error: "Organization request not found." }, { status: 404 });
@@ -39,7 +37,6 @@ export default async function handler(request: Request): Promise<Response> {
     return Response.json({ result: data });
   }
   if (action === "set-trial") {
-    try { await requireSuperAdmin(token); } catch { return Response.json({ error: "Forbidden" }, { status: 403 }); }
     const { data, error } = await adminClient.rpc("set_organization_trial", { p_actor_id: actorId, p_org_id: orgId, p_unit: body.unit, p_count: body.count });
     if (error) return Response.json({ error: error.message }, { status: 400 });
     return Response.json({ trial: data });

@@ -1,5 +1,5 @@
 import { deflateRawSync } from "node:zlib";
-import { adminClient, bearerToken, requireSuperAdmin } from "./_lib/supabase.js";
+import { adminClient, bearerToken, requirePlatformAdmin } from "./_lib/supabase.js";
 
 const TABLES = ["business_profiles","categories","transactions","credit_sales","credit_payments","budgets","budget_items","budget_retirements","audit_events","stock_items","stock_movements","commission_roles","workers","dispatches","vendor_remittances","commission_payments"] as const;
 
@@ -45,7 +45,7 @@ export default async function handler(request: Request): Promise<Response> {
   const token = bearerToken(request);
   if (!token) return Response.json({ error: "Unauthorized" }, { status: 401 });
   let actorId: string;
-  try { actorId = await requireSuperAdmin(token); } catch { return Response.json({ error: "Forbidden" }, { status: 403 }); }
+  try { actorId = await requirePlatformAdmin(token); } catch { return Response.json({ error: "Forbidden" }, { status: 403 }); }
   const match = new URL(request.url).pathname.match(/\/api\/export\/org\/([^/.]+)\.xlsx$/);
   if (!match) return Response.json({ error: "Organization ID is required." }, { status: 400 });
   const orgId = match[1];

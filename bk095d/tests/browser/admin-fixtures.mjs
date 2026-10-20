@@ -9,7 +9,7 @@ export async function mockAdminWorkspace(page, role = "super_admin", options = {
   companies[1].trial_ends_at = new Date(Date.now() + 2 * 86400000).toISOString();
   companies[5].trial_ends_at = new Date(Date.now() + 3 * 86400000).toISOString();
   const administrators = [
-    { user_id: id(1), email: "paul@example.test", role: "super_admin", status: "active", created_at: "2026-10-01T09:00:00Z", last_sign_in_at: "2026-10-20T08:00:00Z" },
+    { user_id: id(1), email: "paul@example.test", role, status: "active", created_at: "2026-10-01T09:00:00Z", last_sign_in_at: "2026-10-20T08:00:00Z" },
     { user_id: id(2), email: "support@example.test", role: "admin", status: "active", created_at: "2026-10-02T09:00:00Z", last_sign_in_at: "2026-10-19T08:00:00Z" },
     { user_id: id(3), email: "operations@example.test", role: "super_admin", status: "setup_pending", created_at: "2026-10-03T09:00:00Z", last_sign_in_at: null },
   ];
@@ -47,7 +47,7 @@ export async function mockAdminWorkspace(page, role = "super_admin", options = {
     }
     if (path === "/api/admin/activity") return route.fulfill({ json: paginate(activity.filter(event => !params.get("action") || params.get("action") === "all" || event.action === params.get("action")), params, "activity") });
     if (path === "/api/admin/administrators") {
-      if (role !== "super_admin") return route.fulfill({ status: 403, json: { error: "Forbidden" } });
+      if (!["admin", "super_admin"].includes(role)) return route.fulfill({ status: 403, json: { error: "Forbidden" } });
       if (request.method() === "POST") {
         const body = request.postDataJSON(), index = administrators.findIndex(a => a.user_id === body.userId);
         if (body.action === "revoke") administrators.splice(index, 1); else administrators[index].role = body.role;
@@ -66,6 +66,7 @@ export async function mockAdminWorkspace(page, role = "super_admin", options = {
       return route.fulfill({ status: 201, json: { invited: true, status: "pending" } });
     }
     if (path === "/api/admin/invite" || path.endsWith("/set-trial")) return route.fulfill({ status: 201, json: { invited: true } });
+    if (path.startsWith("/api/export/org/")) return route.fulfill({ contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", body: Buffer.from("PK-fixture-workbook") });
     return route.fulfill({ status: 404, json: { error: "Unexpected fixture route" } });
   });
   return { user, token, companies, administrators, calls, posts, failNext: (path, message = "The service is temporarily unavailable.") => failures.set(path, message), release: () => release?.(), goto: async (view = "overview") => {

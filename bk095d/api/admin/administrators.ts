@@ -3,7 +3,7 @@ import { adminActor, adminFilters, AdminRequestError, adminJson, adminFailure } 
 export default async function handler(request: Request): Promise<Response> {
   if (!["GET", "POST"].includes(request.method)) return adminJson({ error: "Method not allowed" }, 405);
   try {
-    const actor = await adminActor(request, true);
+    const actor = await adminActor(request);
     if (request.method === "GET") {
       const filters = adminFilters(request, ["all", "admin", "super_admin"]);
       const result = await adminClient.rpc("list_platform_administrators", { p_actor_id: actor, p_page: filters.page, p_search: filters.search, p_role: filters.status });

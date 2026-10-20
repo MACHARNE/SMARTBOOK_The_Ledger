@@ -7,7 +7,6 @@ import AdminDashboard from "./AdminDashboard.jsx";
 export default function App() {
   const [client, setClient] = useState(null);
   const [status, setStatus] = useState(null);
-  const [authMode, setAuthMode] = useState("login");
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -16,8 +15,6 @@ export default function App() {
   const [resetMode, setResetMode] = useState(false);
   const [invitationReady, setInvitationReady] = useState(false);
   const [invitationNeedsPassword, setInvitationNeedsPassword] = useState(false);
-  const [requests, setRequests] = useState([]);
-  const [organizations, setOrganizations] = useState([]);
   const path = window.location.pathname.replace(/\/$/, "") || "/login";
   const adminRoute = path === "/admin/login";
   const superAdminRoute = path === "/super-admin/login";
@@ -52,7 +49,7 @@ export default function App() {
   useEffect(() => {
     (async () => {
       const query = new URLSearchParams(window.location.search);
-      if (query.get("welcome") === "1") setNotice("Your invitation is accepted. Sign in to continue. Company access remains subject to activation.");
+      if (query.get("welcome") === "1") setNotice(platformAdminRoute ? "Your account is ready. Sign in to your platform workspace." : "Your invitation is accepted. Sign in to continue. Company access remains subject to activation.");
       const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
       if (query.get("type") === "recovery" || hash.get("type") === "recovery") setPasswordRecovery(true);
       const authError = query.get("error_description") || hash.get("error_description");
@@ -74,7 +71,7 @@ export default function App() {
         }
         const data = { session: callback.session };
         if (data.session) {
-          const account = await loadAccount(supabase, data.session.access_token);
+          await loadAccount(supabase, data.session.access_token);
         }
       } catch (e) { setError(e.message || "Could not connect to the service."); }
       finally { setBusy(false); }
@@ -120,7 +117,6 @@ export default function App() {
           await signOut();
           throw new Error(`This account is not authorized for the ${superAdminRoute ? "super-admin" : "platform-admin"} portal.`);
         }
-        await loadAdminData(client, data.session.access_token);
       } else if (account.kind === "platform_admin") {
         setNotice(`Platform account verified. Sign in at ${account.role === "super_admin" ? "/super-admin/login" : "/admin/login"}.`);
       }
@@ -218,13 +214,13 @@ export default function App() {
   }
 
   if (!signupRoute && status?.kind === "company_user" && !(status.status === "active" && status.memberStatus === "active")) {
-    const label = status.status === "pending" ? "Your company is awaiting super-admin approval. Ledger access is disabled." : status.status === "rejected" ? `This company request was rejected${status.rejectionReason ? `: ${status.rejectionReason}` : ". Contact Smart Book support for details."}` : status.status === "suspended" ? "This company account is suspended. Ledger access is disabled." : status.status === "no_organization" ? "This account is not linked to a company yet." : status.memberStatus === "invited" ? "Accept the company invitation from your email to activate your access." : "Your account does not currently have active company access.";
+    const label = status.status === "pending" ? "Your company is awaiting administrator approval. Ledger access is disabled." : status.status === "rejected" ? `This company request was rejected${status.rejectionReason ? `: ${status.rejectionReason}` : ". Contact Smart Book support for details."}` : status.status === "suspended" ? "This company account is suspended. Ledger access is disabled." : status.status === "no_organization" ? "This account is not linked to a company yet." : status.memberStatus === "invited" ? "Accept the company invitation from your email to activate your access." : "Your account does not currently have active company access.";
     return <div style={center}><div style={card}><div style={{ fontSize: 11, letterSpacing: "0.18em", color: "#C9A227", fontWeight: 700 }}>SMART BOOK</div><h2 style={{ fontFamily: "'Fraunces', serif", margin: "4px 0 12px" }}>Account status</h2><div style={{ background: "#EFEBE0", padding: 14, borderRadius: 8, fontSize: 14, lineHeight: 1.5 }}>{label}</div><button onClick={signOut} style={{ ...buttonStyle, marginTop: 16 }}>Log Out</button></div></div>;
   }
 
   if (signupRoute) return <div style={center}><form style={card} onSubmit={(event) => { event.preventDefault(); const f = new FormData(event.currentTarget); acceptInvitation(String(f.get("password"))); }}>
     <div style={{ textAlign: "center", marginBottom: 20 }}><div style={{ fontSize: 11, letterSpacing: "0.18em", color: "#C9A227", fontWeight: 700 }}>SMART BOOK</div><div style={{ fontFamily: "'Fraunces', serif", fontSize: 24, fontWeight: 700 }}>Accept invitation</div></div>
-    {!invitationReady ? <div style={{ color: "#7A7566", fontSize: 14, lineHeight: 1.5 }}>Company access is invitation-only. Open the invitation link sent to your email to continue.</div> : (passwordResetRequired || invitationNeedsPassword) ? <label style={{ display: "block", fontSize: 12, color: "#7A7566", fontWeight: 600 }}>Create password (12 characters minimum)<input name="password" type="password" minLength={12} required style={inputStyle} /></label> : <p>Accept your company invitation using your existing account. Your password stays the same.</p>}
+    {!invitationReady ? <div style={{ color: "#7A7566", fontSize: 14, lineHeight: 1.5 }}>{busy ? "Checking your invitation…" : "Access is invitation-only. Open the invitation link sent to your email to continue."}</div> : (passwordResetRequired || invitationNeedsPassword) ? <label style={{ display: "block", fontSize: 12, color: "#7A7566", fontWeight: 600 }}>Create password (12 characters minimum)<input name="password" type="password" minLength={12} required style={inputStyle} /></label> : <p>Accept your invitation using your existing account. Your password stays the same.</p>}
     {error && <div style={{ color: "#A6491E", marginTop: 10, fontSize: 13 }}>{error}</div>}{notice && <div style={{ color: "#2F5233", marginTop: 10, fontSize: 13 }}>{notice}</div>}
     {invitationReady && <button disabled={busy} style={{ ...buttonStyle, width: "100%", marginTop: 14 }}>{busy ? "Accepting…" : (passwordResetRequired || invitationNeedsPassword) ? "Set password and accept" : "Accept invitation"}</button>}<div style={{ fontSize: 12, marginTop: 14 }}><a href="/login">Already registered? Log in</a></div>
   </form></div>;

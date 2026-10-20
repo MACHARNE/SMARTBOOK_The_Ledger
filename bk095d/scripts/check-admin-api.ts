@@ -17,8 +17,14 @@ globalThis.fetch = async (input, init) => {
   if (url.pathname.endsWith("/admin_workspace_summary")) return Response.json({ totalCompanies: 3 });
   if (url.pathname.endsWith("/list_platform_administrators")) return Response.json({ administrators: [], total: 0, page: 0, pageSize: 20 });
   if (url.pathname.endsWith("/manage_platform_administrator")) return Response.json({ changed: true });
-  if (url.pathname === "/rest/v1/organizations") return Response.json([], { headers: { "Content-Range": "0-0/0" } });
-  if (url.pathname === "/rest/v1/organization_signup_requests") return Response.json([], { headers: { "Content-Range": "0-0/0" } });
+  if (url.pathname.endsWith("/decide_organization_request") || url.pathname.endsWith("/set_organization_trial")) return Response.json({ status: "active" });
+  if (url.pathname.endsWith("/provision_company_owner")) return Response.json(ids.member);
+  if (url.pathname.endsWith("/provision_platform_admin")) return Response.json(null);
+  if (url.pathname.endsWith("/export_ledger_data")) return Response.json({ transactions: [] });
+  if (url.pathname === "/auth/v1/admin/users" || url.pathname === "/auth/v1/invite") return Response.json({ id: ids.member, email: "invite@example.test", app_metadata: { force_password_reset: true } });
+  if (url.pathname === "/rest/v1/organizations") return url.searchParams.has("id") ? Response.json({ name: "Test company" }) : Response.json([], { headers: { "Content-Range": "0-0/0" } });
+  if (url.pathname === "/rest/v1/organization_signup_requests") return url.searchParams.has("organization_id") ? Response.json({ id: ids.member }) : Response.json([], { headers: { "Content-Range": "0-0/0" } });
+  if (url.pathname === "/rest/v1/audit_events" && init?.method === "POST") return new Response(null, { status: 201 });
   if (url.pathname === "/rest/v1/audit_events") return Response.json([{ id: 1, action: "suspend", created_at: "2026-10-20T00:00:00Z", actor_user_id: null, organization_id: null, details: { reason: "Owner requested suspension", before: { amount: 999, private: "financial-data" } } }], { headers: { "Content-Range": "0-0/1" } });
   throw Error("Unexpected test request: " + url.pathname);
 };
@@ -30,8 +36,23 @@ try {
     assert.equal((await route(request(path, "member-token"))).status, 403);
   }
   assert.equal((await route(request("/api/admin/overview", "admin-token"))).status, 200);
-  assert.equal((await route(request("/api/admin/administrators", "admin-token"))).status, 403);
-  assert.equal((await route(request("/api/admin/administrators", "admin-token", { action: "revoke", userId: ids.super, reason: "Attempt" }))).status, 403);
+  assert.equal((await route(request("/api/admin/administrators", "admin-token"))).status, 200);
+  const writes: Array<[string, unknown, number]> = [
+    ["/api/admin/administrators", { action: "revoke", userId: ids.super, reason: "Assignment ended" }, 200],
+    ["/api/admin/invite", { email: "invite@example.test", role: "super_admin" }, 201],
+    ["/api/admin/org/provision-owner", { companyName: "Test company", contactName: "Owner", email: "invite@example.test" }, 201],
+    ["/api/admin/decision", { requestId: ids.member, decision: "activate" }, 200],
+    [`/api/admin/org/${ids.member}/suspend`, { reason: "Owner requested pause" }, 200],
+    [`/api/admin/org/${ids.member}/set-trial`, { unit: "week", count: 2 }, 200],
+  ];
+  for (const [path, body, status] of writes) {
+    assert.equal((await route(request(path, "member-token", body))).status, 403, path);
+    for (const token of ["admin-token", "super-token"]) assert.equal((await route(request(path, token, body))).status, status, path);
+  }
+  for (const token of ["admin-token", "super-token"]) {
+    const exported = await route(request(`/api/export/org/${ids.member}.xlsx`, token)); assert.equal(exported.status, 200); assert.equal(exported.headers.get("content-type"), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  }
+  assert.equal((await route(request(`/api/export/org/${ids.member}.xlsx`, "member-token"))).status, 403);
   assert.equal((await route(request("/api/admin/administrators", "super-token"))).status, 200);
   const beforeInvalid = calls.filter(call => call.path.includes("/rpc/")).length;
   assert.equal((await route(request("/api/admin/administrators", "super-token", { action: "revoke", userId: ids.admin }))).status, 400);

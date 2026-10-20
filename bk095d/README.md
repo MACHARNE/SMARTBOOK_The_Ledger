@@ -2,7 +2,7 @@
 
 TypeScript Vercel API handlers live in `api/`. The canonical, forward-only SQL migrations live in `../supabase/migrations/`; the former duplicate migration directory has been removed.
 
-Authentication uses Supabase Auth. Company decisions require a super admin. Organization members read authorized data through RLS and `read_ledger_data`; writes use the versioned `save_ledger_data` and server-calculated `perform_ledger_action` functions. Ordinary table writes and client-authored audit inserts are denied. A database transaction includes related records, version checks, and audit events.
+Authentication uses Supabase Auth. Company and administrator management are available to both platform admins and super admins. Organization members read authorized data through RLS and `read_ledger_data`; writes use the versioned `save_ledger_data` and server-calculated `perform_ledger_action` functions. Ordinary table writes and client-authored audit inserts are denied. A database transaction includes related records, version checks, and audit events.
 
 Email invitations use `/auth/invite`. Identity preparation and database provisioning happen before delivery; retrying delivery reuses the identity. Existing password holders accept with their existing account. Passwordless accounts create their own password, then sign in at the assigned portal.
 

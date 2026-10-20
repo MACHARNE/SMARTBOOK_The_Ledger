@@ -27,8 +27,20 @@ try {
   await actor(admin);
   const summary = await rpc("admin_workspace_summary", [admin]);
   assert.equal(summary.totalCompanies, 3); assert.equal(summary.activeCompanies, 1); assert.equal(summary.pendingRequests, 1);
-  await assert.rejects(rpc("list_platform_administrators", [admin, 0, "", "all"]), /Forbidden/);
-  await assert.rejects(rpc("manage_platform_administrator", [admin, superA, "revoke", null, "Attempted change"]), /Forbidden/);
+  assert.equal((await rpc("list_platform_administrators", [admin, 0, "", "all"])).total, 25);
+  await assert.rejects(rpc("manage_platform_administrator", [admin, admin, "revoke", null, "Self removal"]), /another administrator/);
+  await assert.rejects(rpc("provision_platform_admin", [admin, admin, "super_admin"]), /another administrator/);
+  const invitedOrg = await rpc("provision_company_owner", [admin, member, "Admin invited company", "Owner", "owner@example.test", null]);
+  assert.equal(await rpc("provision_company_owner", [admin, member, "Admin invited company", "Owner", "owner@example.test", null]), invitedOrg, "Owner invitation retry reuses the company");
+  await db.exec("reset role");
+  const invitedRequest = (await db.query("select id from public.organization_signup_requests where organization_id=$1", [invitedOrg])).rows[0].id;
+  await actor(admin);
+  for (const [decision, reason] of [["activate", "Verified"], ["suspend", "Requested pause"], ["reactivate", "Resumed"]]) await rpc("decide_organization_request", [admin, invitedRequest, decision, reason]);
+  assert.equal((await rpc("set_organization_trial", [admin, invitedOrg, "week", 2])).trial_count, 2);
+  assert(Array.isArray((await rpc("export_ledger_data", [admin, invitedOrg])).transactions));
+  await rpc("decide_organization_request", [admin, id(201), "reject", "Details not verified"]);
+  await rpc("provision_platform_admin", [admin, id(25), "super_admin"]);
+  await rpc("provision_platform_admin", [admin, id(25), "admin"]);
   await actor(superA);
   const first = await rpc("list_platform_administrators", [superA, 0, "", "all"]), second = await rpc("list_platform_administrators", [superA, 1, "", "all"]);
   assert.equal(first.total, 25); assert.equal(first.administrators.length, 20); assert.equal(second.administrators.length, 5);
@@ -37,7 +49,7 @@ try {
   assert.equal((await rpc("list_platform_administrators", [superA, 0, "person3@", "all"])).total, 1);
   assert.equal((await rpc("list_platform_administrators", [superA, 0, "%", "all"])).total, 0, "Search treats wildcard characters literally");
   await assert.rejects(rpc("list_platform_administrators", [superA, -1, "", "all"]), /Invalid/);
-  await assert.rejects(rpc("manage_platform_administrator", [superA, superA, "revoke", null, "Self removal"]), /another super admin/);
+  await assert.rejects(rpc("manage_platform_administrator", [superA, superA, "revoke", null, "Self removal"]), /another administrator/);
   await assert.rejects(rpc("manage_platform_administrator", [superA, admin, "revoke", null, " "]), /reason is required/);
   await rpc("manage_platform_administrator", [superA, admin, "change-role", "super_admin", "Covering operations"]);
   await rpc("manage_platform_administrator", [superA, admin, "change-role", "admin", "Coverage ended"]);
@@ -47,10 +59,17 @@ try {
   assert.equal((await db.query("select reviewed_by from public.organization_signup_requests where id=$1", [id(200)])).rows[0].reviewed_by, superB, "Revocation preserves historical approval identity");
   assert.equal((await db.query("select count(*)::int as count from public.organization_members where user_id=$1", [superB])).rows[0].count, 1, "Company membership is retained");
   await actor(superB, "authenticated"); assert.equal(await rpc("is_platform_admin", [superB]), false, "Access removal affects existing identities immediately");
-  await actor(superA); await assert.rejects(rpc("provision_platform_admin", [superA, superA, "admin"]), /last super admin/);
+  await actor(admin);
+  await assert.rejects(rpc("provision_platform_admin", [admin, superA, "admin"]), /last super admin/);
+  await assert.rejects(rpc("manage_platform_administrator", [admin, superA, "revoke", null, "Attempted removal"]), /last super admin/);
   await db.exec("reset role");
   const events = await db.query("select action,actor_user_id,details from public.audit_events where action in ('platform_admin_role_changed','platform_admin_revoked') order by id");
   assert.equal(events.rows.length, 3); assert(events.rows.every(event => event.actor_user_id === superA)); assert.equal(events.rows[2].details.reason, "Platform assignment completed");
-  console.log("Passed: admin summary, literal search and pagination, role restrictions, protected self/last-super-admin access, preserved approval history and memberships, immediate revocation, and trusted audit records.");
+  await actor(admin);
+  await rpc("manage_platform_administrator", [admin, id(25), "change-role", "super_admin", "Team coverage"]);
+  await rpc("manage_platform_administrator", [admin, id(25), "revoke", null, "Assignment ended"]);
+  await actor(member);
+  for (const [name, args] of [["list_platform_administrators", [member, 0, "", "all"]], ["manage_platform_administrator", [member, admin, "revoke", null, "Attempt"]], ["provision_platform_admin", [member, member, "admin"]], ["provision_company_owner", [member, member, "Unauthorized", "Owner", "owner@example.test", null]], ["decide_organization_request", [member, invitedRequest, "suspend", "Attempt"]], ["set_organization_trial", [member, invitedOrg, "week", 1]], ["export_ledger_data", [member, invitedOrg]]]) await assert.rejects(rpc(name, args), /Forbidden/);
+  console.log("Passed: both platform roles manage companies, trials, exports and administrators; company users are denied; self/last-super-admin safeguards, invitation retries, historical attribution, revocation and trusted audits hold.");
 } catch (error) { console.error(error.message); if (error.where) console.error(error.where); process.exitCode = 1; }
 finally { await db.close(); }
