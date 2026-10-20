@@ -16,6 +16,8 @@ jobs:
       - run: npm run typecheck
       - run: npm --workspace bk095d run check:frontend
       - run: npm --workspace bk095d run check:database
+      - run: npm --workspace bk095d run check:admin-workspace
+      - run: npm --workspace bk095d run check:admin-api
       - run: npm --workspace bk095d run check:auth-callback
       - run: npm --workspace bk095d run check:documents
       - run: npm --workspace bk095d run check:admin-invite

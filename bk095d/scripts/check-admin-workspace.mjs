@@ -1,0 +1,56 @@
+import assert from "node:assert/strict";
+import { readFile, readdir } from "node:fs/promises";
+import { PGlite } from "@electric-sql/pglite";
+const db = new PGlite();
+const id = number => `30000000-0000-4000-8000-${String(number).padStart(12, "0")}`;
+const [superA, superB, admin, member] = [1, 2, 3, 4].map(id);
+async function actor(user, role = "service_role") { await db.exec("reset role"); await db.query("select set_config('request.jwt.claim.sub',$1,false),set_config('request.jwt.claim.role',$2,false)", [user, role]); await db.exec(`set role ${role}`); }
+const rpc = async (name, args) => (await db.query(`select public.${name}(${args.map((_, i) => `$${i + 1}`).join(",")}) as result`, args)).rows[0].result;
+try {
+  await db.exec(`create role anon;create role authenticated;create role service_role;create schema auth;grant usage on schema auth to authenticated,service_role;
+    create table auth.users(id uuid primary key,email text,encrypted_password text,confirmation_token text,recovery_token text,email_change_token_new text,email_change text,raw_app_meta_data jsonb default '{}',email_confirmed_at timestamptz,last_sign_in_at timestamptz);
+    create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
+    create function auth.role() returns text language sql stable as $$select current_setting('request.jwt.claim.role',true)$$;`);
+  const directory = new URL("../../supabase/migrations/", import.meta.url);
+  for (const file of (await readdir(directory)).filter(file => file.endsWith(".sql")).sort()) await db.exec((await readFile(new URL(file, directory), "utf8")).replace(/create extension if not exists pgcrypto;/i, ""));
+  await db.query("select set_config('request.jwt.claim.role','service_role',false)");
+  for (let index = 1; index <= 26; index++) await db.query("insert into auth.users(id,email,email_confirmed_at) values($1,$2,now())", [id(index), `person${index}@example.test`]);
+  for (let index = 1; index <= 26; index++) if (index !== 4) await db.query("insert into public.platform_admins(user_id,role) values($1,$2)", [id(index), index <= 2 ? "super_admin" : "admin"]);
+  await db.query("insert into public.organizations(id,name,status) values($1,'Active company','active'),($2,'Pending company','pending'),($3,'Suspended company','suspended')", [id(100), id(101), id(102)]);
+  await db.query("insert into public.organization_members(organization_id,user_id,role,status) values($1,$2,'owner','active'),($1,$3,'staff','active')", [id(100), member, superB]);
+  await db.query("insert into public.organization_signup_requests(id,organization_id,requester_user_id,company_name,contact_name,email,status,reviewed_by) values($1,$2,$3,'Active company','Owner','owner@example.test','active',$4),($5,$6,$3,'Pending company','Owner','owner@example.test','pending',null)", [id(200), id(100), member, superB, id(201), id(101)]);
+  await actor(member, "authenticated");
+  await assert.rejects(rpc("admin_workspace_summary", [member]), /permission denied/);
+  await assert.rejects(rpc("list_platform_administrators", [member, 0, "", "all"]), /permission denied/);
+  await actor(member);
+  await assert.rejects(rpc("admin_workspace_summary", [member]), /Forbidden/);
+  await actor(admin);
+  const summary = await rpc("admin_workspace_summary", [admin]);
+  assert.equal(summary.totalCompanies, 3); assert.equal(summary.activeCompanies, 1); assert.equal(summary.pendingRequests, 1);
+  await assert.rejects(rpc("list_platform_administrators", [admin, 0, "", "all"]), /Forbidden/);
+  await assert.rejects(rpc("manage_platform_administrator", [admin, superA, "revoke", null, "Attempted change"]), /Forbidden/);
+  await actor(superA);
+  const first = await rpc("list_platform_administrators", [superA, 0, "", "all"]), second = await rpc("list_platform_administrators", [superA, 1, "", "all"]);
+  assert.equal(first.total, 25); assert.equal(first.administrators.length, 20); assert.equal(second.administrators.length, 5);
+  assert.equal(new Set([...first.administrators, ...second.administrators].map(a => a.user_id)).size, 25);
+  assert(!JSON.stringify(first).includes("encrypted_password")); assert(!JSON.stringify(first).includes("raw_app_meta_data"));
+  assert.equal((await rpc("list_platform_administrators", [superA, 0, "person3@", "all"])).total, 1);
+  assert.equal((await rpc("list_platform_administrators", [superA, 0, "%", "all"])).total, 0, "Search treats wildcard characters literally");
+  await assert.rejects(rpc("list_platform_administrators", [superA, -1, "", "all"]), /Invalid/);
+  await assert.rejects(rpc("manage_platform_administrator", [superA, superA, "revoke", null, "Self removal"]), /another super admin/);
+  await assert.rejects(rpc("manage_platform_administrator", [superA, admin, "revoke", null, " "]), /reason is required/);
+  await rpc("manage_platform_administrator", [superA, admin, "change-role", "super_admin", "Covering operations"]);
+  await rpc("manage_platform_administrator", [superA, admin, "change-role", "admin", "Coverage ended"]);
+  const noChange = await rpc("manage_platform_administrator", [superA, admin, "change-role", "admin", ""]); assert.equal(noChange.changed, false);
+  await rpc("manage_platform_administrator", [superA, superB, "revoke", null, "Platform assignment completed"]);
+  await db.exec("reset role");
+  assert.equal((await db.query("select reviewed_by from public.organization_signup_requests where id=$1", [id(200)])).rows[0].reviewed_by, superB, "Revocation preserves historical approval identity");
+  assert.equal((await db.query("select count(*)::int as count from public.organization_members where user_id=$1", [superB])).rows[0].count, 1, "Company membership is retained");
+  await actor(superB, "authenticated"); assert.equal(await rpc("is_platform_admin", [superB]), false, "Access removal affects existing identities immediately");
+  await actor(superA); await assert.rejects(rpc("provision_platform_admin", [superA, superA, "admin"]), /last super admin/);
+  await db.exec("reset role");
+  const events = await db.query("select action,actor_user_id,details from public.audit_events where action in ('platform_admin_role_changed','platform_admin_revoked') order by id");
+  assert.equal(events.rows.length, 3); assert(events.rows.every(event => event.actor_user_id === superA)); assert.equal(events.rows[2].details.reason, "Platform assignment completed");
+  console.log("Passed: admin summary, literal search and pagination, role restrictions, protected self/last-super-admin access, preserved approval history and memberships, immediate revocation, and trusted audit records.");
+} catch (error) { console.error(error.message); if (error.where) console.error(error.where); process.exitCode = 1; }
+finally { await db.close(); }

@@ -7,6 +7,9 @@ import adminOrganizations from "./admin/organizations.js";
 import adminProvisionInitial from "./admin/provision-initial.js";
 import adminOrganization from "./admin/organization.js";
 import adminRequests from "./admin/requests.js";
+import adminOverview from "./admin/overview.js";
+import adminAdministrators from "./admin/administrators.js";
+import adminActivity from "./admin/activity.js";
 import completePasswordReset from "./auth/complete-password-reset.js";
 import acceptInvitation from "./org/accept-invitation.js";
 import orgMembers from "./org/members.js";
@@ -20,6 +23,10 @@ const routes: Record<string, Handler> = {
   "POST /api/signup": signup,
   "GET /api/admin/requests": adminRequests,
   "GET /api/admin/organizations": adminOrganizations,
+  "GET /api/admin/overview": adminOverview,
+  "GET /api/admin/administrators": adminAdministrators,
+  "POST /api/admin/administrators": adminAdministrators,
+  "GET /api/admin/activity": adminActivity,
   "POST /api/admin/decision": adminDecision,
   "POST /api/admin/invite": adminInvite,
   "POST /api/admin/provision-initial": adminProvisionInitial,

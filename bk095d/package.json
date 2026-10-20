@@ -9,6 +9,8 @@
     "check:admin-invite": "node --import tsx scripts/check-admin-invite.ts",
     "check:password-setup": "node --import tsx scripts/check-password-setup.ts",
     "check:database": "node scripts/check-ledger-database.mjs",
+    "check:admin-workspace": "node scripts/check-admin-workspace.mjs",
+    "check:admin-api": "node --import tsx scripts/check-admin-api.ts",
     "check:auth-callback": "node scripts/check-auth-callback.mjs",
     "check:documents": "node scripts/check-documents.cjs",
     "diagnose:auth": "node --use-system-ca --env-file=../.env scripts/diagnose-auth.cjs",

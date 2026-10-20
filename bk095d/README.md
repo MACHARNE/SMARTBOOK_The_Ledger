@@ -15,6 +15,8 @@ npm ci
 npm run typecheck
 npm --workspace bk095d run check:frontend
 npm --workspace bk095d run check:database
+npm --workspace bk095d run check:admin-workspace
+npm --workspace bk095d run check:admin-api
 npm --workspace bk095d run check:auth-callback
 npm --workspace bk095d run check:admin-invite
 npm --workspace bk095d run check:password-setup
@@ -30,3 +32,5 @@ npm run test:browser
 `verify:rls` creates disposable fixtures only in the separate project identified by `SMARTBOOK_STAGING_PROJECT_REF`. It unconditionally refuses the known production project. Do not use production credentials for fixture tests.
 
 See `../docs/release-and-verification.md` for deployment, email redirects, migration order, and operational limits.
+
+See `../docs/admin-workspace.md` for platform roles, the administrative APIs, and access management safeguards.

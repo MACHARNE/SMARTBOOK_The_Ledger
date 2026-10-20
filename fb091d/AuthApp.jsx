@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { consumeAuthCallback, loginPortal } from "./auth-flow.js";
 import MeatShareLedger from "./Ledger.jsx";
+import AdminDashboard from "./AdminDashboard.jsx";
 
 export default function App() {
   const [client, setClient] = useState(null);
@@ -31,6 +32,7 @@ export default function App() {
     const response = await fetch("/api/session", { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || "Could not check account status.");
+    result.email = identity.user?.email || "";
     if (result.kind === "company_user" && result.status === "active" && result.memberStatus === "active") {
       if (window.activeOrganizationId !== result.organizationId || !window.storage) {
         window.activeOrganizationId = result.organizationId;
@@ -73,7 +75,6 @@ export default function App() {
         const data = { session: callback.session };
         if (data.session) {
           const account = await loadAccount(supabase, data.session.access_token);
-          if (account.kind === "platform_admin" && platformAdminRoute && account.role === expectedAdminRole && data.session.user?.app_metadata?.force_password_reset !== true) await loadAdminData(supabase, data.session.access_token);
         }
       } catch (e) { setError(e.message || "Could not connect to the service."); }
       finally { setBusy(false); }
@@ -92,21 +93,6 @@ export default function App() {
     window.addEventListener("focus", refreshAccess);
     return () => { window.clearInterval(timer); window.removeEventListener("focus", refreshAccess); };
   }, [client, status?.organizationId]);
-
-  const loadRequests = async (supabase, token) => {
-    const response = await fetch("/api/admin/requests", { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || "Could not load signup requests.");
-    setRequests(result.requests || []);
-  };
-
-  const loadAdminData = async (supabase, token) => {
-    await loadRequests(supabase, token);
-    const response = await fetch("/api/admin/organizations", { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || "Could not load companies.");
-    setOrganizations(result.organizations || []);
-  };
 
   const signOut = async () => {
     if (client) await client.auth.signOut();
@@ -204,38 +190,6 @@ export default function App() {
     finally { setBusy(false); }
   };
 
-  const decideRequest = async (requestId, decision) => {
-    const reason = decision === "reject" || decision === "suspend" ? window.prompt("Enter a reason for this decision:") : "";
-    if ((decision === "reject" || decision === "suspend") && !reason?.trim()) return;
-    const { data } = await client.auth.getSession();
-    const response = await fetch("/api/admin/decision", {
-      method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${data.session.access_token}` },
-      body: JSON.stringify({ requestId, decision, reason }),
-    });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || "Decision could not be saved.");
-    await loadAdminData(client, data.session.access_token);
-  };
-
-  const adminPost = async (url, body) => {
-    const { data } = await client.auth.getSession();
-    const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${data.session.access_token}` }, body: JSON.stringify(body) });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || "Admin action could not be completed.");
-    await loadAdminData(client, data.session.access_token);
-    setNotice("Saved successfully.");
-  };
-
-  const exportCompany = async (org) => {
-    const { data } = await client.auth.getSession();
-    if (!data.session) throw new Error("Sign in again.");
-    const response = await fetch(`/api/export/org/${org.id}.xlsx`, { headers: { Authorization: `Bearer ${data.session.access_token}` } });
-    if (!response.ok) { const result = await response.json(); throw new Error(result.error || "Export failed."); }
-    const href = URL.createObjectURL(await response.blob());
-    const link = document.createElement("a"); link.href=href; link.download=`${org.name.replace(/[^a-z0-9-_]/gi,"-")}-export.xlsx`; link.click();
-    setTimeout(()=>URL.revokeObjectURL(href),1000);
-  };
-
   const center = { minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#F6F3EC", fontFamily: "'Inter', sans-serif", color: "#21281F", padding: 24 };
   const card = { width: "100%", maxWidth: platformAdminRoute ? 640 : 380, background: "#fff", border: "1px solid #D8D2C2", borderRadius: 12, padding: 28 };
   const inputStyle = { display: "block", width: "100%", marginTop: 4, padding: "10px", borderRadius: 8, border: "1px solid #D8D2C2", fontSize: 14, boxSizing: "border-box" };
@@ -251,47 +205,7 @@ export default function App() {
   </form></div>;
 
   if (status?.kind === "platform_admin" && platformAdminRoute && status.role === expectedAdminRole) {
-    return <div style={{ ...center, alignItems: "flex-start" }}><div style={card}>
-      <div style={{ fontSize: 11, letterSpacing: "0.18em", color: "#C9A227", fontWeight: 700 }}>SMART BOOK · PLATFORM</div>
-      <h2 style={{ fontFamily: "'Fraunces', serif", margin: "4px 0 18px" }}>Company approval requests</h2>
-      <button onClick={signOut} style={{ ...buttonStyle, float: "right", marginTop: -48 }}>Log Out</button>
-      {error && <div style={{ color: "#A6491E", marginBottom: 12 }}>{error}</div>}
-      {status.role === "super_admin" && <form onSubmit={async (event) => { event.preventDefault(); const form = event.currentTarget; const f = new FormData(form); try { await adminPost("/api/admin/org/provision-owner", { companyName: f.get("companyName"), contactName: f.get("contactName"), email: f.get("ownerEmail"), phone: f.get("phone") }); form.reset(); } catch (e) { setError(e.message); } }} style={{ border: "1px solid #D8D2C2", borderRadius: 8, padding: 14, marginBottom: 16 }}>
-        <h3 style={{ margin: "0 0 8px" }}>Invite company owner</h3>
-        {[ ["Company name", "companyName", "text"], ["Owner name", "contactName", "text"], ["Owner email", "ownerEmail", "email"], ["Phone (optional)", "phone", "tel"] ].map(([label, name, type]) => <label key={name} style={{ display: "block", fontSize: 12, color: "#7A7566", fontWeight: 600, marginTop: 8 }}>{label}<input name={name} type={type} required={name !== "phone"} style={inputStyle} /></label>)}
-        <button style={{ ...buttonStyle, marginTop: 12 }}>Invite owner and create pending company</button>
-      </form>}
-      {status?.role === "super_admin" && <form onSubmit={async (event) => { event.preventDefault(); const form = event.currentTarget; const f = new FormData(form); try { await adminPost("/api/admin/invite", { email: f.get("adminEmail"), role: f.get("adminRole") }); form.reset(); } catch (e) { setError(e.message); } }} style={{ border: "1px solid #D8D2C2", borderRadius: 8, padding: 14, marginBottom: 16 }}>
-        <h3 style={{ margin: "0 0 8px" }}>Invite platform admin</h3><label style={{ display: "block", fontSize: 12, color: "#7A7566", fontWeight: 600 }}>Email<input name="adminEmail" type="email" required style={inputStyle} /></label>
-        <label style={{ display: "block", fontSize: 12, color: "#7A7566", fontWeight: 600, marginTop: 8 }}>Role<select name="adminRole" style={inputStyle}><option value="admin">Admin</option><option value="super_admin">Super admin</option></select></label><button style={{ ...buttonStyle, marginTop: 12 }}>Send admin invitation</button>
-      </form>}
-      <h3 style={{ marginBottom: 6 }}>Pending signup requests</h3>
-      {!requests.length ? <div style={{ color: "#7A7566", padding: "14px 0" }}>No pending company requests.</div> : requests.map((item) => <div key={item.id} style={{ borderTop: "1px solid #D8D2C2", padding: "14px 0" }}>
-        <strong>{item.company_name}</strong><div style={{ fontSize: 13, color: "#7A7566", marginTop: 5 }}>{item.contact_name} · {item.email}{item.phone ? ` · ${item.phone}` : ""}</div>
-        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-          <button disabled={busy || status.role !== "super_admin"} style={buttonStyle} onClick={() => decideRequest(item.id, "activate").catch((e) => setError(e.message))}>Activate company</button>
-          <button disabled={busy || status.role !== "super_admin"} style={{ ...buttonStyle, background: "#A6491E" }} onClick={() => decideRequest(item.id, "reject").catch((e) => setError(e.message))}>Reject</button>
-        </div>
-      </div>)}
-      {notice && <p role="status">{notice}</p>}
-      <h3 style={{ borderTop: "1px solid #D8D2C2", marginTop: 18, paddingTop: 16, marginBottom: 4 }}>Companies</h3>
-      {organizations.map((org) => {
-        const req = Array.isArray(org.organization_signup_requests) ? org.organization_signup_requests[0] : org.organization_signup_requests;
-        return <div key={org.id} style={{ borderTop: "1px solid #D8D2C2", padding: "12px 0" }}>
-          <strong>{org.name}</strong><span style={{ marginLeft: 8, color: "#7A7566", fontSize: 12 }}>{org.status}</span>
-          <div style={{ fontSize: 12, color: "#7A7566", marginTop: 4 }}>{req?.contact_name || ""}{req?.email ? ` · ${req.email}` : ""}</div>
-          {org.trial_ends_at && <div style={{ fontSize: 12, color: "#7A7566", marginTop: 4 }}>Trial: {org.trial_count} {org.trial_unit}{org.trial_count === 1 ? "" : "s"} · ends {new Date(org.trial_ends_at).toLocaleDateString("en-GB")}</div>}
-          {status?.role === "super_admin" && <button disabled={busy} style={buttonStyle} onClick={() => exportCompany(org).catch(e=>setError(e.message))}>Download company Excel</button>}
-          {status?.role === "super_admin" && <form onSubmit={async (event) => { event.preventDefault(); const form = event.currentTarget; const f = new FormData(form); try { await adminPost(`/api/admin/org/${org.id}/set-trial`, { unit: f.get("unit"), count: Number(f.get("count")) }); } catch (e) { setError(e.message); } }} style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 9 }}>
-            <input aria-label="Trial count" name="count" type="number" min="1" max="1000" defaultValue="1" style={{ ...inputStyle, width: 76, marginTop: 0 }} /><select name="unit" aria-label="Trial unit" style={{ ...inputStyle, width: 100, marginTop: 0 }}><option value="day">day</option><option value="week">week</option><option value="month">month</option><option value="year">year</option></select><button style={{ ...buttonStyle, marginTop: 0 }}>Set trial</button>
-          </form>}
-          {status.role === "super_admin" && req?.id && <div style={{ display: "flex", gap: 8, marginTop: 9 }}>
-            {org.status === "active" && <button style={{ ...buttonStyle, background: "#A6491E" }} onClick={() => decideRequest(req.id, "suspend").catch((e) => setError(e.message))}>Suspend</button>}
-            {org.status === "suspended" && <button style={buttonStyle} onClick={() => decideRequest(req.id, "reactivate").catch((e) => setError(e.message))}>Reactivate</button>}
-          </div>}
-        </div>;
-      })}
-    </div></div>;
+    return <AdminDashboard client={client} account={status} onSignOut={signOut} />;
   }
 
   if (!signupRoute && status?.kind === "platform_admin" && (!platformAdminRoute || status.role !== expectedAdminRole)) {
